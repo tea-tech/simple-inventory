@@ -929,18 +929,29 @@ function closeUnknownBarcodePrompt() {
     }
 }
 
-function createNewBox(barcode = null) {
+async function createNewBox(barcode = null) {
     closeUnknownBarcodePrompt();
     const useBarcode = barcode || (typeof pendingNewBarcode === 'string' ? pendingNewBarcode : pendingNewBarcode?.barcode);
     pendingNewBarcode = null;
     
+    // Ensure warehouses are loaded
+    if (warehouses.length === 0) {
+        try {
+            warehouses = await api.getWarehouses();
+        } catch (error) {
+            console.error('Failed to load warehouses:', error);
+        }
+    }
+    
+    // Update warehouse dropdown options
+    updateWarehouseSelects();
+    
     // Open box modal with barcode prefilled
+    const form = document.getElementById('boxForm');
+    form.reset();
+    form.dataset.id = '';  // Clear the edit ID to ensure we create a new box
     document.getElementById('boxModalTitle').textContent = 'Add Box';
-    document.getElementById('boxId').value = '';
     document.getElementById('boxBarcode').value = useBarcode || '';
-    document.getElementById('boxName').value = '';
-    document.getElementById('boxDescription').value = '';
-    document.getElementById('boxLocation').value = '';
     document.getElementById('boxWarehouse').value = warehouses.length > 0 ? warehouses[0].id : '';
     document.getElementById('boxModal').classList.add('active');
     
@@ -1441,6 +1452,8 @@ function showBoxModal(box = null) {
 
 function closeBoxModal() {
     document.getElementById('boxModal').classList.remove('active');
+    // Clear the form data ID to prevent stale edit state
+    document.getElementById('boxForm').dataset.id = '';
 }
 
 async function saveBox(e) {
