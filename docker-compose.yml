@@ -1,0 +1,15 @@
+services:
+  inventory:
+    build: .
+    container_name: simple-inventory
+    ports:
+      - "8000:8000"
+    volumes:
+      - inventory_data:/data
+    environment:
+      - SECRET_KEY=change-this-to-a-secure-random-key
+      - ACCESS_TOKEN_EXPIRE_MINUTES=480
+    restart: unless-stopped
+
+volumes:
+  inventory_data:
