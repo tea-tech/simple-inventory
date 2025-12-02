@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Inventory</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-boxes-stacked"></i> <span>Inventory</span></h1>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li>
+                        <a href="#" data-page="dashboard" class="active">
+                            <i class="fas fa-home"></i>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-page="warehouses">
+                            <i class="fas fa-warehouse"></i>
+                            <span>Warehouses</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-page="boxes">
+                            <i class="fas fa-box"></i>
+                            <span>Boxes</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-page="items">
+                            <i class="fas fa-cube"></i>
+                            <span>Items</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-page="orders">
+                            <i class="fas fa-clipboard-list"></i>
+                            <span>Orders</span>
+                        </a>
+                    </li>
+                    <li class="manager-only">
+                        <a href="#" data-page="checks">
+                            <i class="fas fa-clipboard-check"></i>
+                            <span>Inventory Check</span>
+                        </a>
+                    </li>
+                    <li class="admin-only">
+                        <a href="#" data-page="users">
+                            <i class="fas fa-users"></i>
+                            <span>Users</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="user-info">
+                <div class="user-name" id="userName">User</div>
+                <div class="user-role" id="userRole">Role</div>
+                <button class="logout-btn" id="logoutBtn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Alerts -->
+            <div id="alerts"></div>
+
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page">
+                <div class="page-header">
+                    <h2>Dashboard</h2>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon warehouses">
+                            <i class="fas fa-warehouse"></i>
+                        </div>
+                        <div class="info">
+                            <h3 id="stat-warehouses">0</h3>
+                            <p>Warehouses</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="icon boxes">
+                            <i class="fas fa-box"></i>
+                        </div>
+                        <div class="info">
+                            <h3 id="stat-boxes">0</h3>
+                            <p>Boxes</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="icon items">
+                            <i class="fas fa-cube"></i>
+                        </div>
+                        <div class="info">
+                            <h3 id="stat-items">0</h3>
+                            <p>Total Items</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="icon orders">
+                            <i class="fas fa-clipboard-list"></i>
+                        </div>
+                        <div class="info">
+                            <h3 id="stat-orders">0</h3>
+                            <p>Active Orders</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card admin-only">
+                        <div class="icon users">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="info">
+                            <h3 id="stat-users">0</h3>
+                            <p>Users</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Warehouses Page -->
+            <div id="page-warehouses" class="page hidden">
+                <div class="page-header">
+                    <h2>Warehouses</h2>
+                    <button class="btn btn-primary admin-only" onclick="showWarehouseModal()">
+                        <i class="fas fa-plus"></i> Add Warehouse
+                    </button>
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Location</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="warehousesTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Boxes Page -->
+            <div id="page-boxes" class="page hidden">
+                <div class="page-header">
+                    <h2>Boxes</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="exportBoxesCSV()">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                        <label class="btn btn-secondary manager-only">
+                            <i class="fas fa-upload"></i> Import CSV
+                            <input type="file" id="boxImportFile" accept=".csv" onchange="importBoxesCSV(this)" hidden>
+                        </label>
+                        <button class="btn btn-primary manager-only" onclick="showBoxModal()">
+                            <i class="fas fa-plus"></i> Add Box
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="filters">
+                    <select id="boxWarehouseFilter" class="warehouse-select" onchange="filterBoxes()">
+                        <option value="">All Warehouses</option>
+                    </select>
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Barcode</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Warehouse</th>
+                                    <th>Actions</th>
+                                    <th>Scan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="boxesTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Items Page -->
+            <div id="page-items" class="page hidden">
+                <div class="page-header">
+                    <h2>Items</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="exportItemsCSV()">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                        <label class="btn btn-secondary manager-only">
+                            <i class="fas fa-upload"></i> Import CSV
+                            <input type="file" id="itemImportFile" accept=".csv" onchange="importItemsCSV(this)" hidden>
+                        </label>
+                        <button class="btn btn-primary manager-only" onclick="showItemModal()">
+                            <i class="fas fa-plus"></i> Add Item
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="filters">
+                    <select id="itemBoxFilter" class="box-select" onchange="filterItems()">
+                        <option value="">All Boxes</option>
+                    </select>
+                    <input type="text" id="itemSearch" placeholder="Search items..." onkeyup="searchItems()">
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Barcode</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Qty</th>
+                                    <th>Price</th>
+                                    <th>Box</th>
+                                    <th>Actions</th>
+                                    <th>Scan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="itemsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orders Page -->
+            <div id="page-orders" class="page hidden">
+                <div class="page-header">
+                    <h2>Orders</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-primary manager-only" onclick="showOrderModal()">
+                            <i class="fas fa-plus"></i> New Order
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="filters">
+                    <select id="orderStatusFilter" class="status-select" onchange="filterOrders()">
+                        <option value="">All Statuses</option>
+                        <option value="new">New</option>
+                        <option value="sourcing">Sourcing</option>
+                        <option value="packed">Packed</option>
+                        <option value="done">Done</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Barcode</th>
+                                    <th>Name</th>
+                                    <th>Status</th>
+                                    <th>Items</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                    <th>Scan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ordersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory Checks Page -->
+            <div id="page-checks" class="page hidden">
+                <div class="page-header">
+                    <h2>Inventory Checks</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-primary manager-only" onclick="showNewCheckModal()">
+                            <i class="fas fa-plus"></i> New Check
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Active Check Banner -->
+                <div id="activeCheckBanner" class="active-check-banner hidden">
+                    <div class="banner-content">
+                        <i class="fas fa-clipboard-check"></i>
+                        <span>Active Check: <strong id="activeCheckName"></strong></span>
+                        <span class="check-progress" id="activeCheckProgress">0/0 items</span>
+                    </div>
+                    <div class="banner-actions">
+                        <button class="btn btn-sm" onclick="viewActiveCheck()">View</button>
+                        <button class="btn btn-sm btn-success" onclick="completeActiveCheck()">Complete</button>
+                        <button class="btn btn-sm btn-danger" onclick="cancelActiveCheck()">Cancel</button>
+                    </div>
+                </div>
+                
+                <div class="filters">
+                    <select id="checkStatusFilter" class="status-select" onchange="filterChecks()">
+                        <option value="">All Statuses</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                    <th>Differences</th>
+                                    <th>Started</th>
+                                    <th>Completed</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="checksTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Check Detail View -->
+            <div id="page-check-detail" class="page hidden">
+                <div class="page-header">
+                    <h2>
+                        <button class="btn btn-back" onclick="navigateTo('checks')">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <span id="checkDetailTitle">Inventory Check</span>
+                    </h2>
+                    <div class="header-actions" id="checkDetailActions">
+                        <select id="compareCheckSelect" class="compare-select" onchange="loadCheckComparison()">
+                            <option value="">Compare with...</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="exportCheckForPrint()">
+                            <i class="fas fa-print"></i> Print
+                        </button>
+                        <button class="btn btn-success" id="completeCheckBtn" onclick="completeCurrentCheck()">
+                            <i class="fas fa-check"></i> Complete
+                        </button>
+                        <button class="btn btn-danger" id="cancelCheckBtn" onclick="cancelCurrentCheck()">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="check-summary" id="checkSummary">
+                    <div class="summary-item">
+                        <span class="label">Total Items:</span>
+                        <span class="value" id="checkTotalItems">0</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Checked:</span>
+                        <span class="value" id="checkCheckedItems">0</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Remaining:</span>
+                        <span class="value" id="checkRemainingItems">0</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="label">Differences:</span>
+                        <span class="value" id="checkDifferences">0</span>
+                    </div>
+                </div>
+                
+                <div class="check-hint" id="checkModeHint">
+                    <i class="fas fa-barcode"></i> Scan item barcodes to check them
+                </div>
+                
+                <div id="checkBoxGroups" class="check-box-groups"></div>
+            </div>
+
+            <!-- Users Page (Admin Only) -->
+            <div id="page-users" class="page hidden">
+                <div class="page-header">
+                    <h2>Users</h2>
+                    <button class="btn btn-primary" onclick="showUserModal()">
+                        <i class="fas fa-plus"></i> Add User
+                    </button>
+                </div>
+                
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Full Name</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Warehouse Modal -->
+    <div id="warehouseModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="warehouseModalTitle">Add Warehouse</h3>
+                <button class="modal-close" onclick="closeWarehouseModal()">&times;</button>
+            </div>
+            <form id="warehouseForm" onsubmit="saveWarehouse(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="warehouseName">Name *</label>
+                        <input type="text" id="warehouseName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="warehouseDescription">Description</label>
+                        <textarea id="warehouseDescription" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="warehouseLocation">Location</label>
+                        <input type="text" id="warehouseLocation">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeWarehouseModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Box Modal -->
+    <div id="boxModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="boxModalTitle">Add Box</h3>
+                <button class="modal-close" onclick="closeBoxModal()">&times;</button>
+            </div>
+            <form id="boxForm" onsubmit="saveBox(event)">
+                <input type="hidden" id="boxId">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="boxBarcode">Barcode *</label>
+                        <input type="text" id="boxBarcode" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="boxName">Name *</label>
+                        <input type="text" id="boxName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="boxDescription">Description</label>
+                        <textarea id="boxDescription" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="boxLocation">Location</label>
+                        <input type="text" id="boxLocation" placeholder="e.g. Shelf A, Row 3">
+                    </div>
+                    <div class="form-group">
+                        <label for="boxWarehouse">Warehouse *</label>
+                        <select id="boxWarehouse" class="warehouse-select-required" required></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeBoxModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Move Box Modal -->
+    <div id="moveBoxModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Move Box</h3>
+                <button class="modal-close" onclick="closeMoveBoxModal()">&times;</button>
+            </div>
+            <form onsubmit="moveBox(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="moveBoxId">
+                    <p>Move box <strong id="moveBoxName"></strong> to:</p>
+                    <div class="form-group">
+                        <label for="moveBoxTarget">Target Warehouse *</label>
+                        <select id="moveBoxTarget" class="warehouse-select-required" required></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeMoveBoxModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Move</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Item Modal -->
+    <div id="itemModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="itemModalTitle">Add Item</h3>
+                <button class="modal-close" onclick="closeItemModal()">&times;</button>
+            </div>
+            <form id="itemForm" onsubmit="saveItem(event)">
+                <input type="hidden" id="itemId">
+                <input type="hidden" id="itemBoxId">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="itemBarcode">Barcode *</label>
+                        <input type="text" id="itemBarcode" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="itemBoxInput">Box * <span class="hint">(scan or select)</span></label>
+                        <div class="input-with-dropdown">
+                            <input type="text" id="itemBoxInput" placeholder="Scan box barcode or type to search..." required autocomplete="off">
+                            <button type="button" class="dropdown-toggle" onclick="toggleBoxDropdown()">
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div id="itemBoxDropdown" class="dropdown-menu"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="itemName">Name *</label>
+                        <input type="text" id="itemName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="itemDescription">Description</label>
+                        <textarea id="itemDescription" rows="3"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="itemQuantity">Quantity *</label>
+                            <input type="number" id="itemQuantity" min="1" value="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="itemPrice">Price</label>
+                            <input type="number" id="itemPrice" min="0" step="0.01" placeholder="0.00">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeItemModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Store Item Modal -->
+    <div id="storeItemModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Store Items</h3>
+                <button class="modal-close" onclick="closeStoreItemModal()">&times;</button>
+            </div>
+            <form onsubmit="storeItem(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="storeItemId">
+                    <p>Add quantity to <strong id="storeItemName"></strong>:</p>
+                    <div class="form-group">
+                        <label for="storeItemQuantity">Quantity to Add</label>
+                        <input type="number" id="storeItemQuantity" min="1" value="1" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeStoreItemModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Store</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Take Item Modal -->
+    <div id="takeItemModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Take Items</h3>
+                <button class="modal-close" onclick="closeTakeItemModal()">&times;</button>
+            </div>
+            <form onsubmit="takeItem(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="takeItemId">
+                    <p>Take from <strong id="takeItemName"></strong> (max: <span id="takeItemMax"></span>):</p>
+                    <div class="form-group">
+                        <label for="takeItemQuantity">Quantity to Take</label>
+                        <input type="number" id="takeItemQuantity" min="1" value="1" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeTakeItemModal()">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Take</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Move Item Modal -->
+    <div id="moveItemModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Move Item</h3>
+                <button class="modal-close" onclick="closeMoveItemModal()">&times;</button>
+            </div>
+            <form onsubmit="moveItem(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="moveItemId">
+                    <p>Move <strong id="moveItemName"></strong> to:</p>
+                    <div class="form-group">
+                        <label for="moveItemTarget">Target Box *</label>
+                        <select id="moveItemTarget" class="box-select-required" required></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeMoveItemModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Move</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- User Modal -->
+    <div id="userModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="userModalTitle">Add User</h3>
+                <button class="modal-close" onclick="closeUserModal()">&times;</button>
+            </div>
+            <form id="userForm" onsubmit="saveUser(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="userUsername">Username *</label>
+                        <input type="text" id="userUsername" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="userEmail">Email *</label>
+                        <input type="email" id="userEmail" required>
+                    </div>
+                    <div class="form-group" id="userPasswordGroup">
+                        <label for="userPassword">Password *</label>
+                        <input type="password" id="userPassword">
+                    </div>
+                    <div class="form-group">
+                        <label for="userFullName">Full Name</label>
+                        <input type="text" id="userFullName">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="userRole">Role *</label>
+                            <select id="userRole" required>
+                                <option value="viewer">Viewer</option>
+                                <option value="manager">Manager</option>
+                                <option value="administrator">Administrator</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="userActive">Active</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="userActive" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="changePasswordTitle"><i class="fas fa-key"></i> Change Password</h3>
+                <button class="modal-close" onclick="closeChangePasswordModal()">&times;</button>
+            </div>
+            <form onsubmit="changePassword(event)">
+                <input type="hidden" id="changePasswordUserId">
+                <div class="modal-body">
+                    <div class="form-group" id="currentPasswordGroup">
+                        <label for="currentPassword">Current Password *</label>
+                        <input type="password" id="currentPassword">
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">New Password *</label>
+                        <input type="password" id="newPassword" required minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm New Password *</label>
+                        <input type="password" id="confirmPassword" required minlength="6">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeChangePasswordModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Barcode Result Modal -->
+    <div id="barcodeResultModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="barcodeResultTitle">Scan Result</h3>
+                <button class="modal-close" onclick="closeBarcodeResultModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="barcodeResultContent"></div>
+            </div>
+            <div class="modal-footer" id="barcodeResultActions"></div>
+        </div>
+    </div>
+
+    <!-- Unknown Barcode Prompt Modal -->
+    <div id="unknownBarcodeModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-question-circle"></i> Unknown Barcode</h3>
+                <button class="modal-close" onclick="closeUnknownBarcodePrompt()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="unknown-barcode-info">
+                    <p>Barcode not found in system:</p>
+                    <code id="unknownBarcodeValue" class="barcode-display"></code>
+                </div>
+                <p class="unknown-barcode-question">What would you like to create?</p>
+                <div class="unknown-barcode-buttons">
+                    <button type="button" class="btn btn-lg btn-primary" onclick="createNewBox()">
+                        <i class="fas fa-box"></i> Box
+                    </button>
+                    <button type="button" class="btn btn-lg btn-success" onclick="createNewItem()">
+                        <i class="fas fa-cube"></i> Item
+                    </button>
+                    <button type="button" class="btn btn-lg btn-warning" onclick="createNewOrder()">
+                        <i class="fas fa-clipboard-list"></i> Order
+                    </button>
+                </div>
+                <p class="unknown-barcode-hint">
+                    <i class="fas fa-barcode"></i> Or scan <code>TYPE:BOX</code>, <code>TYPE:ITEM</code>, or <code>TYPE:ORDER</code>
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeUnknownBarcodePrompt()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Order Modal -->
+    <div id="orderModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="orderModalTitle">New Order</h3>
+                <button class="modal-close" onclick="closeOrderModal()">&times;</button>
+            </div>
+            <form id="orderForm" onsubmit="saveOrder(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="orderId">
+                    <div class="form-group">
+                        <label for="orderBarcode">Barcode *</label>
+                        <input type="text" id="orderBarcode" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="orderName">Name *</label>
+                        <input type="text" id="orderName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="orderDescription">Description</label>
+                        <textarea id="orderDescription" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeOrderModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Order</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Order Detail Modal -->
+    <div id="orderDetailModal" class="modal-overlay">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3 id="orderDetailTitle">Order Details</h3>
+                <button class="modal-close" onclick="closeOrderDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="order-detail-header">
+                    <div class="order-info">
+                        <div class="order-barcode-display">
+                            <svg id="orderDetailBarcodeSvg"></svg>
+                            <code id="orderDetailBarcode"></code>
+                        </div>
+                        <div class="order-meta">
+                            <p><strong>Name:</strong> <span id="orderDetailName"></span></p>
+                            <p><strong>Description:</strong> <span id="orderDetailDescription">-</span></p>
+                            <p><strong>Status:</strong> <span id="orderDetailStatus" class="status-badge"></span></p>
+                            <p><strong>Created:</strong> <span id="orderDetailCreated"></span></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="order-items-section">
+                    <h4><i class="fas fa-cube"></i> Order Items</h4>
+                    <div id="orderItemsEmpty" class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No items in this order yet</p>
+                        <p class="hint">Scan order barcode, then <code>ACTION:ADD</code>, then item barcode</p>
+                    </div>
+                    <table id="orderItemsTable" class="hidden">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Barcode</th>
+                                <th>Source Box</th>
+                                <th>Qty</th>
+                                <th>Price</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orderItemsTableBody"></tbody>
+                    </table>
+                </div>
+                
+                <div id="returnItemsSection" class="return-items-section hidden">
+                    <h4><i class="fas fa-undo"></i> Return Items to Inventory</h4>
+                    <p class="return-hint">Return items to their original boxes:</p>
+                    <div id="returnItemsList"></div>
+                    <div class="return-actions">
+                        <button type="button" class="btn btn-success" onclick="returnAllItems()">
+                            <i class="fas fa-undo"></i> Return All Items
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="markReturnsDone()">
+                            <i class="fas fa-check"></i> Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" id="orderDetailFooter">
+                <button type="button" class="btn" onclick="closeOrderDetailModal()">Close</button>
+                <button type="button" class="btn btn-warning" id="btnCancelOrder" onclick="cancelCurrentOrder()">
+                    <i class="fas fa-ban"></i> Cancel Order
+                </button>
+                <button type="button" class="btn btn-success" id="btnPackOrder" onclick="packCurrentOrder()">
+                    <i class="fas fa-box"></i> Pack Order
+                </button>
+                <button type="button" class="btn btn-primary" id="btnCompleteOrder" onclick="completeCurrentOrder()">
+                    <i class="fas fa-check"></i> Complete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quantity Prompt Modal -->
+    <div id="quantityPromptModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="quantityPromptTitle">Enter Quantity</h3>
+                <button class="modal-close" onclick="closeQuantityPrompt(); cancelPendingAction();">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="quantity-prompt-item">
+                    <i class="fas fa-cube"></i> <span id="quantityPromptItem"></span>
+                </div>
+                <div class="quantity-input-large">
+                    <button type="button" onclick="decrementQuantity()">
+                        <i class="fas fa-minus"></i>
+                    </button>
+                    <input type="number" id="scannerQuantityInput" min="1" value="1">
+                    <button type="button" onclick="incrementQuantity()">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                <div id="quantityMaxInfo" class="quantity-max-info hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeQuantityPrompt(); cancelPendingAction();">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitQuantityPrompt()">
+                    <i class="fas fa-check"></i> Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Check Modal -->
+    <div id="newCheckModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>New Inventory Check</h3>
+                <button class="modal-close" onclick="closeNewCheckModal()">&times;</button>
+            </div>
+            <form id="newCheckForm" onsubmit="createNewCheck(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="checkName">Check Name *</label>
+                        <input type="text" id="checkName" required placeholder="e.g. Monthly Check December 2025">
+                    </div>
+                    <div class="form-group">
+                        <label for="checkDescription">Description</label>
+                        <textarea id="checkDescription" rows="3" placeholder="Optional notes about this check"></textarea>
+                    </div>
+                    <div class="check-info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <span>This will create a snapshot of all current items for checking.</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeNewCheckModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-clipboard-check"></i> Start Check
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Check Item Quantity Modal -->
+    <div id="checkQuantityModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-clipboard-check"></i> Count Item</h3>
+                <button class="modal-close" onclick="closeCheckQuantityModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="check-item-info">
+                    <div class="check-item-name" id="checkItemName"></div>
+                    <div class="check-item-barcode" id="checkItemBarcode"></div>
+                    <div class="check-item-box" id="checkItemBox"></div>
+                </div>
+                <div class="check-expected">
+                    Expected: <strong id="checkExpectedQty">0</strong>
+                </div>
+                <div class="form-group">
+                    <label for="checkActualQty">Actual Count *</label>
+                    <div class="quantity-input-large">
+                        <button type="button" onclick="decrementCheckQuantity()">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" id="checkActualQty" min="0" value="">
+                        <button type="button" onclick="incrementCheckQuantity()">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeCheckQuantityModal()">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="submitCheckQuantity()">
+                    <i class="fas fa-check"></i> Save Count
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rolling Hints -->
+    <div class="hints-widget">
+        <div class="hints-container">
+            <div class="hint active"><i class="fas fa-barcode"></i> Scan barcode anytime to search</div>
+            <div class="hint"><i class="fas fa-arrows-alt"></i> Item → <code>ACTION:MOVE</code> → Box</div>
+            <div class="hint"><i class="fas fa-plus-circle"></i> Item → <code>ACTION:ADD</code> → Qty to add</div>
+            <div class="hint"><i class="fas fa-minus-circle"></i> Item → <code>ACTION:TAKE</code> → Qty to take</div>
+            <div class="hint"><i class="fas fa-clipboard-list"></i> Order → <code>ACTION:ADD</code> → Item → Qty</div>
+            <div class="hint"><i class="fas fa-check-circle"></i> <code>ACTION:DONE</code> to pack order</div>
+            <div class="hint"><i class="fas fa-times-circle"></i> <code>ACTION:CANCEL</code> or ESC to cancel</div>
+            <div class="hint"><i class="fas fa-question-circle"></i> Unknown? → <code>TYPE:BOX</code> / <code>TYPE:ITEM</code> / <code>TYPE:ORDER</code></div>
+        </div>
+        <a href="/static/action-codes.html" target="_blank" class="print-codes-link" title="Print action code barcodes">
+            <i class="fas fa-print"></i>
+        </a>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Action Codes - Simple Inventory</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f6fa;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #7f8c8d;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #3498db;
+            text-decoration: none;
+            margin-bottom: 20px;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .section-title {
+            max-width: 1200px;
+            margin: 30px auto 15px;
+            font-size: 1.2rem;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .codes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .code-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .code-card.move { border-top: 4px solid #3498db; }
+        .code-card.add { border-top: 4px solid #2ecc71; }
+        .code-card.take { border-top: 4px solid #f39c12; }
+        .code-card.done { border-top: 4px solid #27ae60; }
+        .code-card.cancel { border-top: 4px solid #e74c3c; }
+        .code-card.type-box { border-top: 4px solid #9b59b6; }
+        .code-card.type-item { border-top: 4px solid #1abc9c; }
+        .code-card.type-order { border-top: 4px solid #e67e22; }
+        
+        .code-card h3 {
+            margin-bottom: 5px;
+            color: #2c3e50;
+        }
+        
+        .code-card .description {
+            color: #7f8c8d;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+        
+        .code-card svg {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .code-value {
+            font-family: monospace;
+            background: #2c3e50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            display: inline-block;
+        }
+        
+        .print-btn {
+            display: block;
+            margin: 30px auto;
+            padding: 15px 40px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+        }
+        
+        .print-btn:hover {
+            background: #2980b9;
+        }
+        
+        .instructions {
+            max-width: 800px;
+            margin: 30px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .instructions h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .instructions ol, .instructions ul {
+            margin-left: 20px;
+            color: #555;
+        }
+        
+        .instructions li {
+            margin-bottom: 10px;
+        }
+        
+        .instructions code {
+            background: #ecf0f1;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .header, .back-link, .print-btn, .instructions, .section-title {
+                display: none;
+            }
+            
+            .codes-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 15px;
+            }
+            
+            .code-card {
+                box-shadow: none;
+                border: 1px solid #ddd;
+                page-break-inside: avoid;
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="/static/index.html" class="back-link">
+        <i class="fas fa-arrow-left"></i> Back to Inventory
+    </a>
+    
+    <div class="header">
+        <h1><i class="fas fa-qrcode"></i> Action Code Barcodes</h1>
+        <p>Print these barcodes and place them at your workstation for scanner-only operation</p>
+    </div>
+    
+    <h2 class="section-title"><i class="fas fa-bolt"></i> Action Codes</h2>
+    <div class="codes-grid">
+        <div class="code-card move">
+            <h3><i class="fas fa-arrows-alt"></i> MOVE</h3>
+            <p class="description">Move item to another box</p>
+            <svg id="barcode-move"></svg>
+            <div class="code-value">ACTION:MOVE</div>
+        </div>
+        
+        <div class="code-card add">
+            <h3><i class="fas fa-plus-circle"></i> ADD</h3>
+            <p class="description">Add quantity to item<br>or add item to order</p>
+            <svg id="barcode-add"></svg>
+            <div class="code-value">ACTION:ADD</div>
+        </div>
+        
+        <div class="code-card take">
+            <h3><i class="fas fa-minus-circle"></i> TAKE</h3>
+            <p class="description">Remove quantity from item</p>
+            <svg id="barcode-take"></svg>
+            <div class="code-value">ACTION:TAKE</div>
+        </div>
+        
+        <div class="code-card done">
+            <h3><i class="fas fa-check-circle"></i> DONE</h3>
+            <p class="description">Pack order / confirm action</p>
+            <svg id="barcode-done"></svg>
+            <div class="code-value">ACTION:DONE</div>
+        </div>
+        
+        <div class="code-card cancel">
+            <h3><i class="fas fa-times-circle"></i> CANCEL</h3>
+            <p class="description">Cancel current action<br>or cancel order</p>
+            <svg id="barcode-cancel"></svg>
+            <div class="code-value">ACTION:CANCEL</div>
+        </div>
+    </div>
+    
+    <h2 class="section-title"><i class="fas fa-plus"></i> Type Codes (Create New)</h2>
+    <div class="codes-grid">
+        <div class="code-card type-box">
+            <h3><i class="fas fa-box"></i> TYPE: BOX</h3>
+            <p class="description">Create new box from barcode</p>
+            <svg id="barcode-type-box"></svg>
+            <div class="code-value">TYPE:BOX</div>
+        </div>
+        
+        <div class="code-card type-item">
+            <h3><i class="fas fa-cube"></i> TYPE: ITEM</h3>
+            <p class="description">Create new item from barcode</p>
+            <svg id="barcode-type-item"></svg>
+            <div class="code-value">TYPE:ITEM</div>
+        </div>
+        
+        <div class="code-card type-order">
+            <h3><i class="fas fa-clipboard-list"></i> TYPE: ORDER</h3>
+            <p class="description">Create new order from barcode</p>
+            <svg id="barcode-type-order"></svg>
+            <div class="code-value">TYPE:ORDER</div>
+        </div>
+    </div>
+    
+    <button class="print-btn" onclick="window.print()">
+        <i class="fas fa-print"></i> Print Action Codes
+    </button>
+    
+    <div class="instructions">
+        <h3><i class="fas fa-cube"></i> Item Operations</h3>
+        <ol>
+            <li><strong>Scan an ITEM barcode</strong> - Item becomes "selected"</li>
+            <li><strong>Scan an ACTION code</strong>:
+                <ul>
+                    <li><code>ACTION:MOVE</code> → Scan target BOX to move item</li>
+                    <li><code>ACTION:ADD</code> → Enter quantity to add to inventory</li>
+                    <li><code>ACTION:TAKE</code> → Enter quantity to remove from inventory</li>
+                </ul>
+            </li>
+            <li><strong>Scan <code>ACTION:CANCEL</code></strong> or press ESC to cancel</li>
+        </ol>
+        
+        <h3 style="margin-top: 20px;"><i class="fas fa-clipboard-list"></i> Order Operations</h3>
+        <ol>
+            <li><strong>Scan an ORDER barcode</strong> - Order becomes "selected"</li>
+            <li><strong>Scan <code>ACTION:ADD</code></strong> - Now scan item barcodes to add to order</li>
+            <li><strong>Enter quantity</strong> when prompted (removes from inventory)</li>
+            <li><strong>Scan <code>ACTION:DONE</code></strong> to pack the order</li>
+            <li><strong>Scan <code>ACTION:CANCEL</code></strong> to cancel the order</li>
+        </ol>
+        
+        <h3 style="margin-top: 20px;"><i class="fas fa-plus-circle"></i> Creating New Items</h3>
+        <ol>
+            <li><strong>Scan an unknown barcode</strong> - Prompt appears</li>
+            <li><strong>Scan TYPE code</strong>: <code>TYPE:BOX</code>, <code>TYPE:ITEM</code>, or <code>TYPE:ORDER</code></li>
+            <li><strong>Fill in details</strong> - Barcode is prefilled</li>
+            <li><strong>For items:</strong> Scan a box barcode to assign location</li>
+        </ol>
+    </div>
+    
+    <script>
+        // Generate barcodes
+        JsBarcode("#barcode-move", "ACTION:MOVE", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-add", "ACTION:ADD", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-take", "ACTION:TAKE", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-done", "ACTION:DONE", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-cancel", "ACTION:CANCEL", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-type-box", "TYPE:BOX", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-type-item", "TYPE:ITEM", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+        
+        JsBarcode("#barcode-type-order", "TYPE:ORDER", {
+            format: "CODE128",
+            width: 2,
+            height: 60,
+            displayValue: false
+        });
+    </script>
+</body>
+</html>
