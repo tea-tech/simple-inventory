@@ -138,8 +138,7 @@ Environment variables can be set in a `.env` file:
 
 ## Contributing
 
-GitHub Copilot (Claude Opus 4.5)
-Me
+GitHub Copilot (Claude Opus 4.5) & Me
 
 ## License
 
