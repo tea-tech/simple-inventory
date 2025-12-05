@@ -12,6 +12,7 @@ class Item(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     barcode = Column(String(100), unique=True, index=True, nullable=False)
+    origin_barcode = Column(String(100), nullable=True, index=True)  # Original EAN/UPC/ISBN
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     quantity = Column(Integer, default=1, nullable=False)

@@ -467,6 +467,88 @@ class ApiClient {
             method: 'POST'
         });
     }
+
+    // Barcode Lookup - lookup product info from online databases
+    async lookupBarcode(barcode) {
+        return this.request(`/barcode-lookup/${barcode}`);
+    }
+
+    async quickLookupBarcode(barcode) {
+        return this.request(`/barcode-lookup/quick/${barcode}`);
+    }
+
+    // Settings
+    async getSettings() {
+        return this.request('/settings/');
+    }
+
+    async getSetting(key) {
+        return this.request(`/settings/${key}`);
+    }
+
+    async updateSetting(key, value) {
+        return this.request(`/settings/${key}`, {
+            method: 'PUT',
+            body: JSON.stringify({ value: value })
+        });
+    }
+
+    async testBarcodePattern(pattern, barcode) {
+        return this.request('/settings/test-pattern', {
+            method: 'POST',
+            body: JSON.stringify({ pattern: pattern, barcode: barcode })
+        });
+    }
+
+    async getPatternExamples(pattern) {
+        return this.request(`/settings/pattern/examples?pattern=${encodeURIComponent(pattern)}`);
+    }
+
+    async validateBarcode(barcode) {
+        return this.request(`/settings/validate-barcode?barcode=${encodeURIComponent(barcode)}`, {
+            method: 'POST'
+        });
+    }
+
+    // Supplier Patterns
+    async getSupplierPatterns(enabledOnly = false) {
+        const query = enabledOnly ? '?enabled_only=true' : '';
+        return this.request(`/supplier-patterns/${query}`);
+    }
+
+    async getSupplierPattern(id) {
+        return this.request(`/supplier-patterns/${id}`);
+    }
+
+    async matchSupplierBarcode(barcode) {
+        return this.request(`/supplier-patterns/match/${encodeURIComponent(barcode)}`);
+    }
+
+    async createSupplierPattern(data) {
+        return this.request('/supplier-patterns/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateSupplierPattern(id, data) {
+        return this.request(`/supplier-patterns/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async deleteSupplierPattern(id) {
+        return this.request(`/supplier-patterns/${id}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async testSupplierPattern(pattern, barcode) {
+        return this.request(`/supplier-patterns/test?pattern=${encodeURIComponent(pattern)}&barcode=${encodeURIComponent(barcode)}`, {
+            method: 'POST'
+        });
+    }
 }
 
 // Global API instance

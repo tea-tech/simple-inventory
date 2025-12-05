@@ -60,6 +60,12 @@
                             <span>Users</span>
                         </a>
                     </li>
+                    <li class="admin-only">
+                        <a href="#" data-page="settings">
+                            <i class="fas fa-cog"></i>
+                            <span>Settings</span>
+                        </a>
+                    </li>
                 </ul>
             </nav>
             
@@ -237,6 +243,7 @@
                             <thead>
                                 <tr>
                                     <th>Barcode</th>
+                                    <th>Origin</th>
                                     <th>Name</th>
                                     <th>Description</th>
                                     <th>Qty</th>
@@ -427,7 +434,211 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Settings Page (Admin Only) -->
+            <div id="page-settings" class="page hidden">
+                <div class="page-header">
+                    <h2><i class="fas fa-cog"></i> Settings</h2>
+                </div>
+                
+                <div class="settings-container">
+                    <!-- Barcode Pattern Settings -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-barcode"></i> Barcode Pattern</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="settings-description">
+                                Define a pattern for your internal inventory barcodes. Barcodes that don't match this pattern 
+                                will be treated as external (EAN/UPC/ISBN) and trigger an automatic online lookup.
+                            </p>
+                            
+                            <div class="pattern-syntax">
+                                <h4>Pattern Syntax:</h4>
+                                <ul>
+                                    <li><code>#</code> - Matches a single digit (0-9)</li>
+                                    <li><code>*</code> - Matches any single character</li>
+                                    <li><code>$</code> - Matches any character or none (optional)</li>
+                                    <li>Other characters - Must match exactly</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="pattern-examples">
+                                <h4>Examples:</h4>
+                                <table class="examples-table">
+                                    <tr>
+                                        <td><code>######</code></td>
+                                        <td>6-digit number (000000 - 999999)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>INV-####</code></td>
+                                        <td>INV- followed by 4 digits (INV-0000 - INV-9999)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>LA######$</code></td>
+                                        <td>LA + 6 digits + optional char (LA150177 or LA150177M)</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>WH##-BOX###</code></td>
+                                        <td>Warehouse/Box format (WH01-BOX001)</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="barcodePattern">Barcode Pattern</label>
+                                <input type="text" id="barcodePattern" placeholder="e.g. ######" 
+                                       oninput="updatePatternPreview()">
+                                <small class="form-hint">Leave empty to accept all barcodes as internal</small>
+                            </div>
+                            
+                            <div id="patternPreview" class="pattern-preview hidden">
+                                <h4>Pattern Preview:</h4>
+                                <div class="preview-examples" id="patternExamples"></div>
+                            </div>
+                            
+                            <div class="form-group pattern-test">
+                                <label for="testBarcode">Test a Barcode</label>
+                                <div class="input-group">
+                                    <input type="text" id="testBarcode" placeholder="Enter barcode to test..." 
+                                           onkeydown="if(event.key==='Enter'){event.preventDefault();testBarcodePattern();}">
+                                    <button type="button" class="btn btn-secondary" onclick="testBarcodePattern()">
+                                        <i class="fas fa-check"></i> Test
+                                    </button>
+                                </div>
+                                <div id="testResult" class="test-result hidden"></div>
+                            </div>
+                            
+                            <button type="button" class="btn btn-primary" onclick="saveBarcodePattern()">
+                                <i class="fas fa-save"></i> Save Pattern
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Auto Lookup Settings -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-search"></i> External Barcode Lookup</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="settings-description">
+                                When a scanned barcode doesn't match the internal pattern, automatically search 
+                                online databases (Open Food Facts, Open Library, UPC Database) for product information.
+                            </p>
+                            
+                            <div class="form-group">
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="autoLookupEnabled" onchange="saveAutoLookupSetting()">
+                                    <span class="toggle-switch"><span class="toggle-slider"></span></span>
+                                    <span>Enable automatic online lookup for external barcodes</span>
+                                </label>
+                            </div>
+                            
+                            <div class="lookup-sources">
+                                <h4>Data Sources (Free):</h4>
+                                <ul>
+                                    <li><i class="fas fa-utensils"></i> <strong>Open Food Facts</strong> - Food & consumer products</li>
+                                    <li><i class="fas fa-book"></i> <strong>Open Library</strong> - Books (ISBN)</li>
+                                    <li><i class="fas fa-shopping-cart"></i> <strong>UPC Database</strong> - General products</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Supplier Patterns -->
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-store"></i> Supplier Barcode Patterns</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="settings-description">
+                                Define patterns for supplier inventory codes. When a barcode matches a supplier pattern,
+                                a direct link to search on their website will be available.
+                            </p>
+                            
+                            <div class="pattern-syntax">
+                                <h4>Pattern Syntax:</h4>
+                                <ul>
+                                    <li><code>#</code> - Matches a single digit (0-9)</li>
+                                    <li><code>*</code> - Matches any single character</li>
+                                    <li><code>$</code> - Matches any character or none (optional)</li>
+                                    <li>Other characters - Must match exactly (case-insensitive)</li>
+                                </ul>
+                                <p><strong>Example:</strong> Pattern <code>LA######$</code> matches <code>LA150177</code> or <code>LA150177M</code></p>
+                            </div>
+                            
+                            <div class="supplier-patterns-list" id="supplierPatternsList">
+                                <!-- Patterns loaded dynamically -->
+                            </div>
+                            
+                            <button type="button" class="btn btn-primary" onclick="showSupplierPatternModal()">
+                                <i class="fas fa-plus"></i> Add Supplier Pattern
+                            </button>
+                            
+                            <div class="form-group pattern-test" style="margin-top: 20px;">
+                                <label for="testSupplierBarcode">Test a Barcode Against Suppliers</label>
+                                <div class="input-group">
+                                    <input type="text" id="testSupplierBarcode" placeholder="e.g., LA150177M"
+                                           onkeydown="if(event.key==='Enter'){event.preventDefault();testSupplierBarcode();}">
+                                    <button type="button" class="btn btn-secondary" onclick="testSupplierBarcode()">
+                                        <i class="fas fa-search"></i> Test
+                                    </button>
+                                </div>
+                                <div id="supplierTestResult" class="test-result hidden"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
+    </div>
+
+    <!-- Supplier Pattern Modal -->
+    <div id="supplierPatternModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="supplierPatternModalTitle">Add Supplier Pattern</h3>
+                <button class="modal-close" onclick="closeSupplierPatternModal()">&times;</button>
+            </div>
+            <form id="supplierPatternForm" onsubmit="saveSupplierPattern(event)">
+                <input type="hidden" id="supplierPatternId">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="supplierPatternName">Supplier Name *</label>
+                        <input type="text" id="supplierPatternName" required placeholder="e.g., LaskaKit">
+                    </div>
+                    <div class="form-group">
+                        <label for="supplierPatternPattern">Barcode Pattern *</label>
+                        <input type="text" id="supplierPatternPattern" required placeholder="e.g., LA######*">
+                        <small class="form-hint"># = digit, * = any character</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="supplierPatternUrl">Search URL *</label>
+                        <input type="text" id="supplierPatternUrl" required 
+                               placeholder="e.g., https://laskakit.cz/vyhledavani/?string={barcode}">
+                        <small class="form-hint">Use <code>{barcode}</code> as placeholder for the scanned code</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="supplierPatternDescription">Description</label>
+                        <textarea id="supplierPatternDescription" rows="2" 
+                                  placeholder="Optional description..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="supplierPatternEnabled" checked>
+                            <span class="toggle-switch"><span class="toggle-slider"></span></span>
+                            <span>Enabled</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeSupplierPatternModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- Warehouse Modal -->
@@ -525,53 +736,113 @@
 
     <!-- Item Modal -->
     <div id="itemModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h3 id="itemModalTitle">Add Item</h3>
-                <button class="modal-close" onclick="closeItemModal()">&times;</button>
+        <div class="modal item-modal-expandable">
+            <div class="modal-main-content">
+                <div class="modal-header">
+                    <h3 id="itemModalTitle">Add Item</h3>
+                    <button class="modal-close" onclick="closeItemModal()">&times;</button>
+                </div>
+                <form id="itemForm" onsubmit="saveItem(event)">
+                    <input type="hidden" id="itemId">
+                    <input type="hidden" id="itemBoxId">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="itemBarcode">Barcode *</label>
+                            <div class="barcode-input-group">
+                                <input type="text" id="itemBarcode" required>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="lookupItemBarcode()" title="Search online databases">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Product Hint Section -->
+                        <div id="productHintSection" class="product-hint-section hidden">
+                            <div class="product-hint-header">
+                                <i class="fas fa-lightbulb"></i> Product Found Online
+                                <button type="button" class="btn btn-sm btn-success" onclick="applyProductHint()">
+                                    <i class="fas fa-check"></i> Apply
+                                </button>
+                                <button type="button" class="btn-close-hint" onclick="hideProductHint()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="product-hint-content">
+                                <div class="product-hint-image" id="productHintImage"></div>
+                                <div class="product-hint-details">
+                                    <div class="product-hint-name" id="productHintName"></div>
+                                    <div class="product-hint-brand" id="productHintBrand"></div>
+                                    <div class="product-hint-desc" id="productHintDesc"></div>
+                                    <div class="product-hint-source" id="productHintSource"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Supplier Link Section -->
+                        <div id="supplierLinkSection" class="supplier-link-section hidden">
+                            <div class="supplier-link-header">
+                                <i class="fas fa-store"></i> <span id="supplierLinkName">Supplier</span>
+                                <a href="#" id="supplierLinkUrl" target="_blank" class="btn btn-sm btn-info">
+                                    <i class="fas fa-external-link-alt"></i> Open
+                                </a>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="toggleSupplierPanel()">
+                                    <i class="fas fa-columns"></i> Preview
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="itemBoxInput">Box * <span class="hint">(scan or select)</span></label>
+                            <div class="input-with-dropdown">
+                                <input type="text" id="itemBoxInput" placeholder="Scan box barcode or type to search..." required autocomplete="off">
+                                <button type="button" class="dropdown-toggle" onclick="toggleBoxDropdown()">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                <div id="itemBoxDropdown" class="dropdown-menu"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="itemName">Name *</label>
+                            <input type="text" id="itemName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="itemDescription">Description</label>
+                            <textarea id="itemDescription" rows="3"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="itemQuantity">Quantity *</label>
+                                <input type="number" id="itemQuantity" min="1" value="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="itemPrice">Price</label>
+                                <input type="number" id="itemPrice" min="0" step="0.01" placeholder="0.00">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="itemOriginBarcode">Origin Barcode <span class="hint">(EAN/UPC/ISBN)</span></label>
+                            <input type="text" id="itemOriginBarcode" placeholder="Original product barcode">
+                            <small class="form-hint">Store the original manufacturer barcode for reference</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn" onclick="closeItemModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </form>
             </div>
-            <form id="itemForm" onsubmit="saveItem(event)">
-                <input type="hidden" id="itemId">
-                <input type="hidden" id="itemBoxId">
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="itemBarcode">Barcode *</label>
-                        <input type="text" id="itemBarcode" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="itemBoxInput">Box * <span class="hint">(scan or select)</span></label>
-                        <div class="input-with-dropdown">
-                            <input type="text" id="itemBoxInput" placeholder="Scan box barcode or type to search..." required autocomplete="off">
-                            <button type="button" class="dropdown-toggle" onclick="toggleBoxDropdown()">
-                                <i class="fas fa-chevron-down"></i>
-                            </button>
-                            <div id="itemBoxDropdown" class="dropdown-menu"></div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="itemName">Name *</label>
-                        <input type="text" id="itemName" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="itemDescription">Description</label>
-                        <textarea id="itemDescription" rows="3"></textarea>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="itemQuantity">Quantity *</label>
-                            <input type="number" id="itemQuantity" min="1" value="1" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="itemPrice">Price</label>
-                            <input type="number" id="itemPrice" min="0" step="0.01" placeholder="0.00">
-                        </div>
-                    </div>
+            <!-- Supplier Preview Panel -->
+            <div id="supplierPreviewPanel" class="supplier-preview-panel hidden">
+                <div class="supplier-preview-header">
+                    <span id="supplierPreviewTitle">Supplier Preview</span>
+                    <button type="button" class="btn-close-panel" onclick="closeSupplierPanel()">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn" onclick="closeItemModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
+                <div class="supplier-preview-content">
+                    <iframe id="supplierPreviewFrame" src="about:blank" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 
@@ -755,6 +1026,10 @@
                     <p>Barcode not found in system:</p>
                     <code id="unknownBarcodeValue" class="barcode-display"></code>
                 </div>
+                
+                <!-- Supplier Link (if matched) -->
+                <div id="supplierLinkContainer" class="hidden"></div>
+                
                 <p class="unknown-barcode-question">What would you like to create?</p>
                 <div class="unknown-barcode-buttons">
                     <button type="button" class="btn btn-lg btn-primary" onclick="createNewBox()">

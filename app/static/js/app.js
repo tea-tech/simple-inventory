@@ -115,6 +115,9 @@ function initializeApp() {
 
     // Preload data for barcode lookups
     preloadData();
+    
+    // Load app settings (barcode pattern, etc.)
+    loadAppSettings();
 
     // Load initial page
     navigateTo('dashboard');
@@ -914,9 +917,45 @@ async function searchByBarcode(barcode) {
 }
 
 // Unknown Barcode Prompt Functions
-function showUnknownBarcodePrompt(barcode) {
+async function showUnknownBarcodePrompt(barcode) {
     pendingNewBarcode = barcode;
+    
+    // Check if this is an external barcode (doesn't match pattern)
+    const isExternal = !isInternalBarcode(barcode);
+    
+    if (isExternal && appSettings.auto_lookup_external) {
+        // Auto-trigger item creation with barcode lookup
+        createNewItem(barcode);
+        return;
+    }
+    
     document.getElementById('unknownBarcodeValue').textContent = barcode;
+    
+    // Check for supplier pattern match
+    const supplierLinkContainer = document.getElementById('supplierLinkContainer');
+    if (supplierLinkContainer) {
+        try {
+            const match = await matchSupplierPattern(barcode);
+            if (match.matched && match.search_url) {
+                supplierLinkContainer.innerHTML = `
+                    <div class="supplier-match-info">
+                        <p><i class="fas fa-store"></i> This looks like a <strong>${escapeHtml(match.supplier.name)}</strong> code</p>
+                        <a href="${escapeHtml(match.search_url)}" target="_blank" class="btn btn-info supplier-search-btn">
+                            <i class="fas fa-external-link-alt"></i> Search on ${escapeHtml(match.supplier.name)}
+                        </a>
+                    </div>
+                `;
+                supplierLinkContainer.classList.remove('hidden');
+            } else {
+                supplierLinkContainer.classList.add('hidden');
+                supplierLinkContainer.innerHTML = '';
+            }
+        } catch (error) {
+            console.error('Failed to check supplier pattern:', error);
+            supplierLinkContainer.classList.add('hidden');
+        }
+    }
+    
     document.getElementById('unknownBarcodeModal').classList.add('active');
 }
 
@@ -963,11 +1002,19 @@ function createNewItem(barcode = null) {
     closeUnknownBarcodePrompt();
     const useBarcode = barcode || (typeof pendingNewBarcode === 'string' ? pendingNewBarcode : pendingNewBarcode?.barcode);
     
+    // Check if this is an external barcode (doesn't match pattern)
+    const isExternal = useBarcode && !isInternalBarcode(useBarcode);
+    
     // Store the barcode for when a box is scanned
     pendingNewBarcode = { type: 'item', barcode: useBarcode };
     
     // Update box datalist
     updateBoxSelects();
+    
+    // Hide any previous product hint and supplier link
+    hideProductHint();
+    hideSupplierLink();
+    closeSupplierPanel();
     
     // Open item modal with barcode prefilled
     document.getElementById('itemModalTitle').textContent = 'Add Item';
@@ -980,7 +1027,26 @@ function createNewItem(barcode = null) {
     document.getElementById('itemQuantity').value = 1;
     document.getElementById('itemPrice').value = '';
     document.getElementById('itemForm').dataset.id = '';
+    
+    // If external barcode, also set it as origin barcode
+    if (isExternal) {
+        document.getElementById('itemOriginBarcode').value = useBarcode;
+    } else {
+        document.getElementById('itemOriginBarcode').value = '';
+    }
+    
     document.getElementById('itemModal').classList.add('active');
+    
+    // Check for supplier pattern match
+    if (useBarcode) {
+        checkSupplierForItemModal(useBarcode);
+    }
+    
+    // Auto-lookup if barcode looks like a valid EAN/UPC/ISBN (external barcode)
+    if (useBarcode && useBarcode.length >= 8 && useBarcode.match(/^\d+$/) && isExternal) {
+        // Small delay to let the modal open first
+        setTimeout(() => lookupItemBarcode(), 200);
+    }
     
     // Focus on box field so user can scan box barcode
     setTimeout(() => document.getElementById('itemBoxInput').focus(), 100);
@@ -997,12 +1063,24 @@ function showBarcodeResult(type, data) {
     if (type === 'item') {
         const box = boxes.find(b => b.id === data.box_id);
         title.innerHTML = `<i class="fas fa-cube"></i> Item Found`;
+        
+        let originInfo = '';
+        if (data.origin_barcode) {
+            originInfo = `
+                <div class="result-row">
+                    <span class="label">Origin Code:</span>
+                    <span class="value"><code>${escapeHtml(data.origin_barcode)}</code></span>
+                </div>
+            `;
+        }
+        
         content.innerHTML = `
             <div class="result-details">
                 <div class="result-row">
                     <span class="label">Barcode:</span>
                     <span class="value"><code>${escapeHtml(data.barcode)}</code></span>
                 </div>
+                ${originInfo}
                 <div class="result-row">
                     <span class="label">Name:</span>
                     <span class="value"><strong>${escapeHtml(data.name)}</strong></span>
@@ -1020,7 +1098,12 @@ function showBarcodeResult(type, data) {
                     <span class="value">${box ? escapeHtml(box.name) : 'Unknown'}</span>
                 </div>
             </div>
+            <div id="itemSupplierLink" class="hidden"></div>
         `;
+        
+        // Check for supplier pattern match on origin_barcode or barcode
+        const barcodeToCheck = data.origin_barcode || data.barcode;
+        checkAndShowSupplierLink(barcodeToCheck, 'itemSupplierLink');
         
         const isManager = ['administrator', 'manager'].includes(currentUser.role);
         actions.innerHTML = isManager ? `
@@ -1175,6 +1258,9 @@ async function loadPageData(page) {
             break;
         case 'users':
             await loadUsers();
+            break;
+        case 'settings':
+            await loadSettings();
             break;
     }
 }
@@ -1603,7 +1689,7 @@ function renderItems() {
     if (items.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="empty-state">
+                <td colspan="9" class="empty-state">
                     <i class="fas fa-cube"></i>
                     <h3>No items found</h3>
                     <p>Add items to your inventory</p>
@@ -1618,9 +1704,13 @@ function renderItems() {
         const priceDisplay = item.price !== null && item.price !== undefined 
             ? `$${item.price.toFixed(2)}` 
             : '-';
+        const originDisplay = item.origin_barcode 
+            ? `<code title="Original EAN/UPC/ISBN">${escapeHtml(item.origin_barcode)}</code>` 
+            : '-';
         return `
             <tr>
                 <td><code>${escapeHtml(item.barcode)}</code></td>
+                <td>${originDisplay}</td>
                 <td><strong>${escapeHtml(item.name)}</strong></td>
                 <td>${escapeHtml(item.description || '-')}</td>
                 <td>${item.quantity}</td>
@@ -1667,6 +1757,9 @@ function showItemModal(item = null) {
     
     // Update box datalist
     updateBoxSelects();
+    
+    // Hide product hint when opening modal
+    hideProductHint();
 
     if (item) {
         document.getElementById('itemId').value = item.id;
@@ -1678,10 +1771,12 @@ function showItemModal(item = null) {
         document.getElementById('itemDescription').value = item.description || '';
         document.getElementById('itemQuantity').value = item.quantity;
         document.getElementById('itemPrice').value = item.price || '';
+        document.getElementById('itemOriginBarcode').value = item.origin_barcode || '';
     } else {
         document.getElementById('itemId').value = '';
         document.getElementById('itemBoxInput').value = '';
         document.getElementById('itemBoxId').value = '';
+        document.getElementById('itemOriginBarcode').value = '';
     }
 
     modal.classList.add('active');
@@ -1689,6 +1784,216 @@ function showItemModal(item = null) {
 
 function closeItemModal() {
     document.getElementById('itemModal').classList.remove('active');
+    hideProductHint();
+    hideSupplierLink();
+    closeSupplierPanel();
+}
+
+// Store current product hint data for apply
+let currentProductHint = null;
+
+// Barcode Lookup - searches online databases for product info
+async function lookupItemBarcode() {
+    const barcodeInput = document.getElementById('itemBarcode');
+    const barcode = barcodeInput.value.trim();
+    
+    if (!barcode || barcode.length < 8) {
+        showAlert('Enter a valid barcode (at least 8 digits)', 'warning');
+        return;
+    }
+    
+    const section = document.getElementById('productHintSection');
+    section.classList.remove('hidden', 'not-found');
+    section.classList.add('loading');
+    
+    // Show loading state
+    document.getElementById('productHintName').textContent = 'Searching...';
+    document.getElementById('productHintBrand').textContent = '';
+    document.getElementById('productHintDesc').textContent = 'Looking up barcode in online databases...';
+    document.getElementById('productHintSource').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Please wait...';
+    document.getElementById('productHintImage').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    
+    try {
+        const result = await api.lookupBarcode(barcode);
+        
+        if (result.found && result.product) {
+            currentProductHint = result.product;
+            section.classList.remove('loading');
+            
+            // Display product info
+            document.getElementById('productHintName').textContent = result.product.name || 'Unknown';
+            document.getElementById('productHintBrand').textContent = result.product.brand ? `Brand: ${result.product.brand}` : '';
+            document.getElementById('productHintDesc').textContent = result.product.description || '';
+            document.getElementById('productHintSource').innerHTML = `<i class="fas fa-database"></i> Source: ${result.product.source || 'Unknown'}`;
+            
+            // Show image if available
+            if (result.product.image_url) {
+                document.getElementById('productHintImage').innerHTML = `<img src="${escapeHtml(result.product.image_url)}" alt="Product" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-image\\'></i>'">`;
+            } else {
+                document.getElementById('productHintImage').innerHTML = '<i class="fas fa-cube"></i>';
+            }
+            
+            showAlert('Product found! Click "Apply" to use this info.', 'success');
+        } else {
+            section.classList.remove('loading');
+            section.classList.add('not-found');
+            currentProductHint = null;
+            
+            document.getElementById('productHintName').textContent = 'Not Found';
+            document.getElementById('productHintBrand').textContent = '';
+            document.getElementById('productHintDesc').textContent = 'No product information found in online databases.';
+            document.getElementById('productHintSource').innerHTML = '<i class="fas fa-info-circle"></i> You can still enter details manually.';
+            document.getElementById('productHintImage').innerHTML = '<i class="fas fa-question"></i>';
+        }
+    } catch (error) {
+        section.classList.remove('loading');
+        section.classList.add('not-found');
+        currentProductHint = null;
+        
+        document.getElementById('productHintName').textContent = 'Lookup Failed';
+        document.getElementById('productHintBrand').textContent = '';
+        document.getElementById('productHintDesc').textContent = error.message || 'Could not connect to lookup service.';
+        document.getElementById('productHintSource').innerHTML = '<i class="fas fa-exclamation-triangle"></i> Please try again later.';
+        document.getElementById('productHintImage').innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+    }
+}
+
+// Apply the product hint to the form fields
+function applyProductHint() {
+    if (!currentProductHint) {
+        showAlert('No product data to apply', 'warning');
+        return;
+    }
+    
+    // Fill in the name (required field)
+    if (currentProductHint.name) {
+        const nameField = document.getElementById('itemName');
+        // Include brand in name if available
+        if (currentProductHint.brand && !currentProductHint.name.toLowerCase().includes(currentProductHint.brand.toLowerCase())) {
+            nameField.value = `${currentProductHint.brand} ${currentProductHint.name}`;
+        } else {
+            nameField.value = currentProductHint.name;
+        }
+    }
+    
+    // Fill in description
+    if (currentProductHint.description || currentProductHint.category) {
+        const descParts = [];
+        if (currentProductHint.description) descParts.push(currentProductHint.description);
+        if (currentProductHint.category && currentProductHint.category !== currentProductHint.description) {
+            descParts.push(`Category: ${currentProductHint.category}`);
+        }
+        document.getElementById('itemDescription').value = descParts.join('. ');
+    }
+    
+    showAlert('Product information applied!', 'success');
+    
+    // Focus on box input as the next step
+    document.getElementById('itemBoxInput').focus();
+}
+
+// Hide the product hint section
+function hideProductHint() {
+    const section = document.getElementById('productHintSection');
+    if (section) {
+        section.classList.add('hidden');
+        section.classList.remove('loading', 'not-found');
+    }
+    currentProductHint = null;
+}
+
+// Supplier link/panel functions for item modal
+let currentSupplierMatch = null;
+
+function hideSupplierLink() {
+    const section = document.getElementById('supplierLinkSection');
+    if (section) {
+        section.classList.add('hidden');
+    }
+    currentSupplierMatch = null;
+}
+
+function showSupplierLink(supplierName, searchUrl) {
+    const section = document.getElementById('supplierLinkSection');
+    const nameEl = document.getElementById('supplierLinkName');
+    const urlEl = document.getElementById('supplierLinkUrl');
+    
+    if (section && nameEl && urlEl) {
+        nameEl.textContent = supplierName;
+        urlEl.href = searchUrl;
+        section.classList.remove('hidden');
+    }
+}
+
+async function checkSupplierForItemModal(barcode) {
+    if (!barcode) return;
+    
+    try {
+        const match = await matchSupplierPattern(barcode);
+        if (match.matched && match.search_url) {
+            currentSupplierMatch = match;
+            showSupplierLink(match.supplier.name, match.search_url);
+        } else {
+            hideSupplierLink();
+        }
+    } catch (error) {
+        console.error('Failed to check supplier pattern:', error);
+        hideSupplierLink();
+    }
+}
+
+function toggleSupplierPanel() {
+    const panel = document.getElementById('supplierPreviewPanel');
+    const modal = document.querySelector('.item-modal-expandable');
+    const iframe = document.getElementById('supplierPreviewFrame');
+    const titleEl = document.getElementById('supplierPreviewTitle');
+    
+    if (!panel || !modal || !currentSupplierMatch) return;
+    
+    if (panel.classList.contains('hidden')) {
+        // Open panel
+        panel.classList.remove('hidden');
+        modal.classList.add('expanded');
+        titleEl.textContent = currentSupplierMatch.supplier.name;
+        iframe.src = currentSupplierMatch.search_url;
+    } else {
+        // Close panel
+        closeSupplierPanel();
+    }
+}
+
+function closeSupplierPanel() {
+    const panel = document.getElementById('supplierPreviewPanel');
+    const modal = document.querySelector('.item-modal-expandable');
+    const iframe = document.getElementById('supplierPreviewFrame');
+    
+    if (panel) {
+        panel.classList.add('hidden');
+    }
+    if (modal) {
+        modal.classList.remove('expanded');
+    }
+    if (iframe) {
+        iframe.src = 'about:blank';
+    }
+}
+
+// Auto-lookup when barcode field loses focus (if barcode is valid)
+function setupBarcodeLookupOnBlur() {
+    const barcodeInput = document.getElementById('itemBarcode');
+    if (barcodeInput) {
+        barcodeInput.addEventListener('blur', async function() {
+            const barcode = this.value.trim();
+            // Check for supplier pattern match
+            if (barcode) {
+                await checkSupplierForItemModal(barcode);
+            }
+            // Only auto-lookup if barcode looks valid and name is empty
+            if (barcode.length >= 8 && barcode.match(/^\d+$/) && !document.getElementById('itemName').value.trim()) {
+                await lookupItemBarcode();
+            }
+        });
+    }
 }
 
 async function saveItem(e) {
@@ -1717,8 +2022,10 @@ async function saveItem(e) {
     }
 
     const priceValue = document.getElementById('itemPrice').value;
+    const originBarcode = document.getElementById('itemOriginBarcode').value.trim();
     const data = {
         barcode: document.getElementById('itemBarcode').value,
+        origin_barcode: originBarcode || null,
         name: document.getElementById('itemName').value,
         description: document.getElementById('itemDescription').value || null,
         quantity: parseInt(document.getElementById('itemQuantity').value),
@@ -3225,4 +3532,408 @@ async function submitQuantityPromptOriginal() {
     }
     
     closeQuantityPrompt();
+}
+
+// ==================== SETTINGS ====================
+
+// Current app settings (cached)
+let appSettings = {
+    barcode_pattern: '',
+    auto_lookup_external: true
+};
+
+async function loadSettings() {
+    try {
+        const settings = await api.getSettings();
+        appSettings = settings;
+        
+        // Populate form fields
+        document.getElementById('barcodePattern').value = settings.barcode_pattern || '';
+        document.getElementById('autoLookupEnabled').checked = settings.auto_lookup_external;
+        
+        // Update pattern preview if pattern is set
+        if (settings.barcode_pattern) {
+            updatePatternPreview();
+        }
+        
+        // Load supplier patterns
+        await loadSupplierPatterns();
+    } catch (error) {
+        showAlert('Failed to load settings', 'danger');
+    }
+}
+
+async function loadAppSettings() {
+    // Load settings into cache (called during app init)
+    try {
+        appSettings = await api.getSettings();
+    } catch (error) {
+        console.error('Failed to load app settings:', error);
+    }
+}
+
+function updatePatternPreview() {
+    const pattern = document.getElementById('barcodePattern').value.trim();
+    const previewSection = document.getElementById('patternPreview');
+    const examplesDiv = document.getElementById('patternExamples');
+    
+    if (!pattern) {
+        previewSection.classList.add('hidden');
+        return;
+    }
+    
+    // Generate examples locally
+    const examples = generateExampleBarcodes(pattern, 5);
+    
+    examplesDiv.innerHTML = examples.map(ex => 
+        `<span class="example-badge">${escapeHtml(ex)}</span>`
+    ).join('');
+    
+    previewSection.classList.remove('hidden');
+}
+
+function generateExampleBarcodes(pattern, count) {
+    if (!pattern) return ['ABC123', 'XYZ789'];
+    
+    const examples = [];
+    for (let i = 0; i < count; i++) {
+        let example = '';
+        let digitCounter = i;
+        for (const char of pattern) {
+            if (char === '#') {
+                example += String(digitCounter % 10);
+                digitCounter++;
+            } else if (char === '*') {
+                example += String.fromCharCode(65 + (i % 26)); // A, B, C...
+            } else {
+                example += char;
+            }
+        }
+        examples.push(example);
+    }
+    return examples;
+}
+
+async function testBarcodePattern() {
+    const pattern = document.getElementById('barcodePattern').value.trim();
+    const barcode = document.getElementById('testBarcode').value.trim();
+    const resultDiv = document.getElementById('testResult');
+    
+    if (!barcode) {
+        showAlert('Enter a barcode to test', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await api.testBarcodePattern(pattern, barcode);
+        
+        resultDiv.classList.remove('hidden', 'success', 'warning', 'error');
+        
+        if (result.is_internal) {
+            resultDiv.classList.add('success');
+            resultDiv.innerHTML = `<i class="fas fa-check-circle"></i> <strong>Internal barcode</strong> - Matches pattern "${pattern || '(any)'}"`;
+        } else {
+            resultDiv.classList.add('warning');
+            resultDiv.innerHTML = `<i class="fas fa-external-link-alt"></i> <strong>External barcode</strong> - Does not match pattern. Will trigger online lookup.`;
+        }
+    } catch (error) {
+        resultDiv.classList.remove('hidden', 'success', 'warning');
+        resultDiv.classList.add('error');
+        resultDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> Error: ${error.message}`;
+    }
+}
+
+async function saveBarcodePattern() {
+    const pattern = document.getElementById('barcodePattern').value.trim();
+    
+    try {
+        await api.updateSetting('barcode_pattern', pattern);
+        appSettings.barcode_pattern = pattern;
+        showAlert('Barcode pattern saved!', 'success');
+    } catch (error) {
+        showAlert(`Failed to save pattern: ${error.message}`, 'danger');
+    }
+}
+
+async function saveAutoLookupSetting() {
+    const enabled = document.getElementById('autoLookupEnabled').checked;
+    
+    try {
+        await api.updateSetting('auto_lookup_external', enabled ? 'true' : 'false');
+        appSettings.auto_lookup_external = enabled;
+        showAlert(`Auto lookup ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    } catch (error) {
+        showAlert(`Failed to save setting: ${error.message}`, 'danger');
+    }
+}
+
+// Check if barcode matches the configured pattern
+function barcodeMatchesPattern(barcode, pattern) {
+    if (!pattern) return true; // No pattern = all barcodes are internal
+    
+    // Use recursive matching to handle $ (optional character)
+    return matchPatternRecursive(barcode, pattern, 0, 0);
+}
+
+function matchPatternRecursive(barcode, pattern, bIdx, pIdx) {
+    // If we've consumed the entire pattern
+    if (pIdx >= pattern.length) {
+        return bIdx >= barcode.length;
+    }
+    
+    const pChar = pattern[pIdx];
+    
+    if (pChar === '$') {
+        // $ matches zero or one character
+        // Try matching zero characters
+        if (matchPatternRecursive(barcode, pattern, bIdx, pIdx + 1)) {
+            return true;
+        }
+        // Try matching one character
+        if (bIdx < barcode.length && matchPatternRecursive(barcode, pattern, bIdx + 1, pIdx + 1)) {
+            return true;
+        }
+        return false;
+    }
+    
+    // For non-$ characters, we need a barcode character to match
+    if (bIdx >= barcode.length) {
+        return false;
+    }
+    
+    const bChar = barcode[bIdx];
+    
+    if (pChar === '#') {
+        if (!/\d/.test(bChar)) return false;
+    } else if (pChar === '*') {
+        // Any character matches
+    } else {
+        if (pChar.toUpperCase() !== bChar.toUpperCase()) return false;
+    }
+    
+    return matchPatternRecursive(barcode, pattern, bIdx + 1, pIdx + 1);
+}
+
+// Determine if a barcode is internal (matches pattern) or external (EAN/UPC/ISBN)
+function isInternalBarcode(barcode) {
+    return barcodeMatchesPattern(barcode, appSettings.barcode_pattern);
+}
+
+// ===== Supplier Patterns =====
+let supplierPatterns = [];
+
+async function loadSupplierPatterns() {
+    try {
+        supplierPatterns = await api.getSupplierPatterns();
+        renderSupplierPatterns();
+    } catch (error) {
+        console.error('Failed to load supplier patterns:', error);
+    }
+}
+
+function renderSupplierPatterns() {
+    const container = document.getElementById('supplierPatternsList');
+    const isAdmin = currentUser.role === 'administrator';
+    
+    if (!supplierPatterns || supplierPatterns.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="padding: 20px; text-align: center; color: var(--gray-color);">
+                <i class="fas fa-store" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                <p>No supplier patterns configured</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = supplierPatterns.map(pattern => `
+        <div class="supplier-pattern-item ${pattern.enabled ? '' : 'disabled'}">
+            <div class="supplier-pattern-info">
+                <h4>
+                    <i class="fas fa-store"></i>
+                    ${escapeHtml(pattern.name)}
+                    <span class="supplier-pattern-badge ${pattern.enabled ? 'enabled' : 'disabled'}">
+                        ${pattern.enabled ? 'Active' : 'Disabled'}
+                    </span>
+                </h4>
+                <div class="supplier-pattern-meta">
+                    <span><i class="fas fa-barcode"></i> Pattern: <code>${escapeHtml(pattern.pattern)}</code></span>
+                </div>
+                <div class="supplier-pattern-url">
+                    <i class="fas fa-link"></i> ${escapeHtml(pattern.search_url)}
+                </div>
+                ${pattern.description ? `<p style="margin-top: 5px; font-size: 0.9rem; color: var(--gray-color);">${escapeHtml(pattern.description)}</p>` : ''}
+            </div>
+            ${isAdmin ? `
+                <div class="supplier-pattern-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="editSupplierPattern(${pattern.id})" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSupplierPattern(${pattern.id})" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+function showSupplierPatternModal(patternId = null) {
+    const modal = document.getElementById('supplierPatternModal');
+    const title = document.getElementById('supplierPatternModalTitle');
+    const form = document.getElementById('supplierPatternForm');
+    
+    form.reset();
+    document.getElementById('supplierPatternId').value = '';
+    document.getElementById('supplierPatternEnabled').checked = true;
+    
+    if (patternId) {
+        const pattern = supplierPatterns.find(p => p.id === patternId);
+        if (pattern) {
+            title.textContent = 'Edit Supplier Pattern';
+            document.getElementById('supplierPatternId').value = pattern.id;
+            document.getElementById('supplierPatternName').value = pattern.name;
+            document.getElementById('supplierPatternPattern').value = pattern.pattern;
+            document.getElementById('supplierPatternUrl').value = pattern.search_url;
+            document.getElementById('supplierPatternDescription').value = pattern.description || '';
+            document.getElementById('supplierPatternEnabled').checked = pattern.enabled;
+        }
+    } else {
+        title.textContent = 'Add Supplier Pattern';
+    }
+    
+    modal.classList.add('active');
+}
+
+function closeSupplierPatternModal() {
+    document.getElementById('supplierPatternModal').classList.remove('active');
+}
+
+async function saveSupplierPattern(event) {
+    event.preventDefault();
+    
+    const id = document.getElementById('supplierPatternId').value;
+    const data = {
+        name: document.getElementById('supplierPatternName').value.trim(),
+        pattern: document.getElementById('supplierPatternPattern').value.trim(),
+        search_url: document.getElementById('supplierPatternUrl').value.trim(),
+        description: document.getElementById('supplierPatternDescription').value.trim() || null,
+        enabled: document.getElementById('supplierPatternEnabled').checked
+    };
+    
+    // Validate URL contains {barcode}
+    if (!data.search_url.includes('{barcode}')) {
+        showAlert('Search URL must contain {barcode} placeholder', 'danger');
+        return;
+    }
+    
+    try {
+        if (id) {
+            await api.updateSupplierPattern(parseInt(id), data);
+            showAlert('Supplier pattern updated!', 'success');
+        } else {
+            await api.createSupplierPattern(data);
+            showAlert('Supplier pattern created!', 'success');
+        }
+        
+        closeSupplierPatternModal();
+        await loadSupplierPatterns();
+    } catch (error) {
+        showAlert(`Failed to save supplier pattern: ${error.message}`, 'danger');
+    }
+}
+
+function editSupplierPattern(id) {
+    showSupplierPatternModal(id);
+}
+
+async function deleteSupplierPattern(id) {
+    const pattern = supplierPatterns.find(p => p.id === id);
+    if (!pattern) return;
+    
+    if (!confirm(`Delete supplier pattern "${pattern.name}"?`)) {
+        return;
+    }
+    
+    try {
+        await api.deleteSupplierPattern(id);
+        showAlert('Supplier pattern deleted', 'success');
+        await loadSupplierPatterns();
+    } catch (error) {
+        showAlert(`Failed to delete: ${error.message}`, 'danger');
+    }
+}
+
+async function testSupplierBarcode() {
+    const barcode = document.getElementById('testSupplierBarcode').value.trim();
+    const resultDiv = document.getElementById('supplierTestResult');
+    
+    if (!barcode) {
+        showAlert('Enter a barcode to test', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await api.matchSupplierBarcode(barcode);
+        
+        resultDiv.classList.remove('hidden', 'matched', 'not-matched');
+        
+        if (result.matched && result.supplier) {
+            resultDiv.classList.add('matched');
+            resultDiv.innerHTML = `
+                <h4><i class="fas fa-check-circle"></i> Match Found!</h4>
+                <p><strong>Supplier:</strong> ${escapeHtml(result.supplier.name)}</p>
+                <p><strong>Pattern:</strong> <code>${escapeHtml(result.supplier.pattern)}</code></p>
+                <a href="${escapeHtml(result.search_url)}" target="_blank" class="search-link">
+                    <i class="fas fa-external-link-alt"></i> Search on ${escapeHtml(result.supplier.name)}
+                </a>
+            `;
+        } else {
+            resultDiv.classList.add('not-matched');
+            resultDiv.innerHTML = `
+                <h4><i class="fas fa-info-circle"></i> No Match</h4>
+                <p>Barcode "${escapeHtml(barcode)}" doesn't match any supplier pattern.</p>
+            `;
+        }
+        
+        resultDiv.classList.add('supplier-match-result');
+    } catch (error) {
+        resultDiv.classList.remove('hidden');
+        resultDiv.innerHTML = `<p style="color: var(--danger-color);"><i class="fas fa-exclamation-circle"></i> Error: ${error.message}</p>`;
+    }
+}
+
+// Check if barcode matches any supplier pattern and return the supplier info
+async function matchSupplierPattern(barcode) {
+    try {
+        return await api.matchSupplierBarcode(barcode);
+    } catch (error) {
+        console.error('Failed to match supplier pattern:', error);
+        return { matched: false };
+    }
+}
+
+// Check barcode and show supplier link in a container
+async function checkAndShowSupplierLink(barcode, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !barcode) return;
+    
+    try {
+        const match = await matchSupplierPattern(barcode);
+        if (match.matched && match.search_url) {
+            container.innerHTML = `
+                <div class="supplier-match-info" style="margin-top: 15px;">
+                    <p><i class="fas fa-store"></i> <strong>${escapeHtml(match.supplier.name)}</strong> product code</p>
+                    <a href="${escapeHtml(match.search_url)}" target="_blank" class="btn btn-info supplier-search-btn">
+                        <i class="fas fa-external-link-alt"></i> View on ${escapeHtml(match.supplier.name)}
+                    </a>
+                </div>
+            `;
+            container.classList.remove('hidden');
+        } else {
+            container.classList.add('hidden');
+        }
+    } catch (error) {
+        console.error('Failed to check supplier link:', error);
+        container.classList.add('hidden');
+    }
 }

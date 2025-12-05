@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class ItemBase(BaseModel):
     """Base item schema."""
     barcode: str
+    origin_barcode: Optional[str] = None  # Original EAN/UPC/ISBN
     name: str
     description: Optional[str] = None
     quantity: int = 1
@@ -21,6 +22,7 @@ class ItemCreate(ItemBase):
 class ItemUpdate(BaseModel):
     """Schema for updating an item."""
     barcode: Optional[str] = None
+    origin_barcode: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     quantity: Optional[int] = None
