@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 
 from app.config import settings
 from app.database import engine, Base
-from app.routes import auth, users, warehouses, boxes, items, orders, inventory_checks, barcode_lookup, settings as settings_routes, supplier_patterns
+from app.routes import auth, users, warehouses, boxes, items, packages, inventory_checks, barcode_lookup, settings as settings_routes, supplier_patterns
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -39,7 +39,7 @@ app.include_router(users.router, prefix="/api")
 app.include_router(warehouses.router, prefix="/api")
 app.include_router(boxes.router, prefix="/api")
 app.include_router(items.router, prefix="/api")
-app.include_router(orders.router, prefix="/api")
+app.include_router(packages.router, prefix="/api")
 app.include_router(inventory_checks.router, prefix="/api")
 app.include_router(barcode_lookup.router, prefix="/api")
 app.include_router(settings_routes.router, prefix="/api")

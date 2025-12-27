@@ -1,27 +1,27 @@
-"""Order schemas."""
+"""Package schemas - replaces Order schemas."""
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
 
 
-class OrderItemBase(BaseModel):
-    """Base schema for order items."""
+class PackageItemBase(BaseModel):
+    """Base schema for package items."""
     item_barcode: str
     item_name: str
     quantity: int = 1
     price: Optional[float] = None
 
 
-class OrderItemCreate(BaseModel):
-    """Schema for adding item to order."""
+class PackageItemCreate(BaseModel):
+    """Schema for adding item to package."""
     item_id: int
     quantity: int = 1
 
 
-class OrderItemResponse(OrderItemBase):
-    """Response schema for order items."""
+class PackageItemResponse(PackageItemBase):
+    """Response schema for package items."""
     id: int
-    order_id: int
+    package_id: int
     item_id: Optional[int] = None
     source_box_id: Optional[int] = None
     source_box_name: Optional[str] = None
@@ -31,39 +31,39 @@ class OrderItemResponse(OrderItemBase):
         from_attributes = True
 
 
-class OrderBase(BaseModel):
-    """Base schema for orders."""
+class PackageBase(BaseModel):
+    """Base schema for packages."""
     barcode: str
     name: str
     description: Optional[str] = None
 
 
-class OrderCreate(OrderBase):
-    """Schema for creating an order."""
+class PackageCreate(PackageBase):
+    """Schema for creating a package."""
     pass
 
 
-class OrderUpdate(BaseModel):
-    """Schema for updating an order."""
+class PackageUpdate(BaseModel):
+    """Schema for updating a package."""
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
 
 
-class OrderResponse(OrderBase):
-    """Response schema for orders."""
+class PackageResponse(PackageBase):
+    """Response schema for packages."""
     id: int
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
-    order_items: List[OrderItemResponse] = []
+    package_items: List[PackageItemResponse] = []
     
     class Config:
         from_attributes = True
 
 
-class OrderSummary(BaseModel):
-    """Summary schema for order list."""
+class PackageSummary(BaseModel):
+    """Summary schema for package list."""
     id: int
     barcode: str
     name: str

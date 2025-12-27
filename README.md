@@ -7,69 +7,34 @@ I have tried many platforms, but everything was either too complex, too expensiv
 I have my room with a shelf. On the shelf, I have boxes with a lot of stuff to track. So this was going to be backbone of the system - Places, boxes & items. Also, i have started to print barcodes. A lot of them.
 While writing this, I have realized that i will ned to quickly move items between boxes and I don't want to interact with computer since my scanner is wireless. So, action codes were born - scan item, then what to do and the third depends on the action. Even thought a catchy name - "Code chain".
 
-## Operation & code chaining
+## Code Chaining
 
-> To be honest, the chaining is mos definetly a deformation from playing Factorio too much. But Factory must grow. I wonder if I can make a Factorio mod that would communicate with this app...
+> To be honest, the chaining is most definitely a deformation from playing Factorio too much. But Factory must grow.
 
-Code chain starts with item barcode. Either its known item or a new one. Refer to the charts below.
+The system uses **code chains** - sequences of barcode scans that perform operations without touching the computer. Scan an item, then an action code, then follow the prompts.
 
-### Creating New Items
+For detailed documentation on the code chain system, see:
+- [Action Codes](docs/action-codes.md) - Available operation and type codes
+- [Code Chains](docs/code-chains.md) - All supported scan sequences
 
-```mermaid
-flowchart LR
-    NC[/"Scan Unknown Barcode"/] --> TB["TYPE:BOX"] --> NewBox["New Box Created"]
-    NC --> TO["TYPE:ORDER"] --> NewOrder["New Order Created"]
-    NC --> TI["TYPE:ITEM"] --> BoxScan[/"Scan Box Barcode"/] --> NewItem["New Item in Box"]
+### Quick Example
+
+```
+Scan Item → OP:MOVE → Scan Box → Item moved!
 ```
 
-### Item Operations
+## Core Concepts
 
-```mermaid
-flowchart LR
-    IC[/"Scan Item Barcode"/] --> AM["ACTION:MOVE"] --> BC[/"Scan Target Box"/] --> MoveItem["Item Moved to Box"]
-    IC --> AA["ACTION:ADD"] --> QtyAdd[/"Enter Quantity"/] --> AddItem["Quantity Added"]
-    IC --> AT["ACTION:TAKE"] --> QtyTake[/"Enter Quantity"/] --> TakeItem["Quantity Removed"]
-    IC --> AC1["ACTION:CANCEL"] --> CancelItem["Action Cancelled"]
-```
+### Entities
 
-### Box Operations
-
-```mermaid
-flowchart LR
-    BX[/"Scan Box Barcode"/] --> BM["ACTION:MOVE"] --> WH[/"Select Warehouse"/] --> MoveBox["Box Moved"]
-```
-
-### Order Operations
-
-```mermaid
-flowchart LR
-    OC[/"Scan Order Barcode"/] --> OA["ACTION:ADD"] --> OI[/"Scan Item Barcode"/] --> OQ[/"Enter Quantity"/] --> AddToOrder["Item Added to Order"]
-    OC --> OD["ACTION:DONE"] --> PackOrder["Order Packed"]
-    OC --> OCancel["ACTION:CANCEL"] --> CancelOrder["Order Cancelled"]
-```
-
-### View Information
-
-```mermaid
-flowchart LR
-    ANY[/"Scan Any Barcode"/] --> ShowInfo["Display Details"]
-```
-
-Other operations are very basic - Warehouses, Orders & Inventory checks.
-
-### Warehouses
-
-Well you wouldn't leave you paper boxes outside in the rain, right? Warehouses are just logical grouping for boxes, that's all.
-
-### Orders
-
-Orders are here when you sell something or want to take parts for a project. Scan code > order and add items. They will be removed from inventory and put into you order. When you are done, pack the order.
-Also if you cancel it, all items can be returned to inventory.
+- **Items** - Physical objects you track (screws, cables, etc.)
+- **Boxes** - Containers that hold items
+- **Packages** - Arrangements of items (orders, kits, project parts)
+- **Warehouses** - Logical groupings for boxes (rooms, shelves, locations)
 
 ### Inventory Checks
 
-Inventory checks are here to help you with stocktaking. Create a new check, scan boxes and items. When done, you can compare the results with current inventory and make adjustments.
-Also you can print them with barcodes on paper formanual check without a scanner. When you are back with results, just scan the printed barcodes & input the counts.
+Inventory checks help with stocktaking. Create a check, scan boxes and items, then compare results with current inventory. You can print checks with barcodes for manual counting without a scanner.
 
 
 ## Installation & setup
@@ -142,4 +107,8 @@ GitHub Copilot (Claude Opus 4.5) & Me
 
 ## License
 
-MIT License
+From rework of the code chain system, the license has been changed to Open Community License (OCL v1), slightly modified (removed 3D printing, line 23).
+Use this system as you wish, but YOU MUST NOT:
+ - Create a commercial product based on this code without a proper license.
+ - Patent or license any part of this code or its derivatives.
+See the LICENSE file for more details.

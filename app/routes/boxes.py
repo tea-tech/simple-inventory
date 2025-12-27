@@ -12,6 +12,8 @@ from app.database import get_db
 from app.models.user import User
 from app.models.box import Box
 from app.models.warehouse import Warehouse
+from app.models.item import Item
+from app.models.package import Package, PackageItem, PackageStatus
 from app.schemas.box import BoxCreate, BoxResponse, BoxUpdate, BoxWithItems
 
 router = APIRouter(prefix="/boxes", tags=["Boxes"])
@@ -286,4 +288,70 @@ async def import_boxes_csv(
         "created": created,
         "updated": updated,
         "errors": errors
+    }
+
+
+@router.post("/{box_id}/convert-to-package")
+async def convert_box_to_package(
+    box_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_manager)
+):
+    """Convert a box to a package. Creates new package with same barcode/name, moves items to package, deletes box."""
+    box = db.query(Box).filter(Box.id == box_id).first()
+    if not box:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Box not found"
+        )
+    
+    # Check barcode not used by existing package
+    existing_package = db.query(Package).filter(Package.barcode == box.barcode).first()
+    if existing_package:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Package with barcode '{box.barcode}' already exists"
+        )
+    
+    # Create new package with same barcode and name
+    new_package = Package(
+        barcode=box.barcode,
+        name=box.name,
+        description=box.description,
+        status=PackageStatus.SOURCING.value if box.items else PackageStatus.NEW.value
+    )
+    db.add(new_package)
+    db.flush()  # Get the package ID
+    
+    # Convert items in box to package items
+    items_moved = 0
+    for item in box.items[:]:  # Copy list to avoid modification during iteration
+        package_item = PackageItem(
+            package_id=new_package.id,
+            item_id=item.id,
+            item_barcode=item.barcode,
+            item_name=item.name,
+            source_box_id=box.id,
+            source_box_name=box.name,
+            quantity=item.quantity,
+            price=item.price
+        )
+        db.add(package_item)
+        
+        # Remove item from inventory
+        db.delete(item)
+        items_moved += 1
+    
+    # Delete the box
+    db.delete(box)
+    db.commit()
+    db.refresh(new_package)
+    
+    return {
+        "success": True,
+        "package_id": new_package.id,
+        "package_barcode": new_package.barcode,
+        "package_name": new_package.name,
+        "items_moved": items_moved,
+        "message": f"Box converted to package '{new_package.name}' with {items_moved} items"
     }

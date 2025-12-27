@@ -317,79 +317,97 @@ class ApiClient {
         return response.json();
     }
 
-    // Orders
-    async getOrders(status = null) {
+    // Packages (replaces Orders)
+    async getPackages(status = null) {
         const params = status ? `?status_filter=${status}` : '';
-        return this.request(`/orders/${params}`);
+        return this.request(`/packages/${params}`);
     }
 
-    async getOrder(id) {
-        return this.request(`/orders/${id}`);
+    async getPackage(id) {
+        return this.request(`/packages/${id}`);
     }
 
-    async getOrderByBarcode(barcode) {
-        return this.request(`/orders/barcode/${barcode}`);
+    async getPackageByBarcode(barcode) {
+        return this.request(`/packages/barcode/${barcode}`);
     }
 
-    async createOrder(data) {
-        return this.request('/orders/', {
+    async createPackage(data) {
+        return this.request('/packages/', {
             method: 'POST',
             body: JSON.stringify(data)
         });
     }
 
-    async updateOrder(id, data) {
-        return this.request(`/orders/${id}`, {
+    async updatePackage(id, data) {
+        return this.request(`/packages/${id}`, {
             method: 'PUT',
             body: JSON.stringify(data)
         });
     }
 
-    async deleteOrder(id) {
-        return this.request(`/orders/${id}`, {
+    async deletePackage(id) {
+        return this.request(`/packages/${id}`, {
             method: 'DELETE'
         });
     }
 
-    async addItemToOrder(orderId, itemId, quantity) {
-        return this.request(`/orders/${orderId}/items`, {
+    async addItemToPackage(packageId, itemId, quantity) {
+        return this.request(`/packages/${packageId}/items`, {
             method: 'POST',
             body: JSON.stringify({ item_id: itemId, quantity: quantity })
         });
     }
 
-    async removeItemFromOrder(orderId, orderItemId) {
-        return this.request(`/orders/${orderId}/items/${orderItemId}`, {
+    async removeItemFromPackage(packageId, packageItemId) {
+        return this.request(`/packages/${packageId}/items/${packageItemId}`, {
             method: 'DELETE'
         });
     }
 
-    async packOrder(orderId) {
-        return this.request(`/orders/${orderId}/pack`, {
+    async packPackage(packageId) {
+        return this.request(`/packages/${packageId}/pack`, {
             method: 'POST'
         });
     }
 
-    async completeOrder(orderId) {
-        return this.request(`/orders/${orderId}/complete`, {
+    async completePackage(packageId) {
+        return this.request(`/packages/${packageId}/complete`, {
             method: 'POST'
         });
     }
 
-    async cancelOrder(orderId) {
-        return this.request(`/orders/${orderId}/cancel`, {
+    async cancelPackage(packageId) {
+        return this.request(`/packages/${packageId}/cancel`, {
             method: 'POST'
         });
     }
 
-    async returnItemToInventory(orderId, orderItemId) {
-        return this.request(`/orders/${orderId}/return-item/${orderItemId}`, {
+    async returnItemToInventory(packageId, packageItemId) {
+        return this.request(`/packages/${packageId}/return-item/${packageItemId}`, {
             method: 'POST'
         });
     }
 
-    async returnAllItemsToInventory(orderId) {
-        return this.request(`/orders/${orderId}/return-all`, {
+    async returnAllItemsToInventory(packageId) {
+        return this.request(`/packages/${packageId}/return-all`, {
+            method: 'POST'
+        });
+    }
+
+    async convertPackageToBox(packageId, warehouseId) {
+        return this.request(`/packages/${packageId}/convert-to-box?warehouse_id=${warehouseId}`, {
+            method: 'POST'
+        });
+    }
+
+    async convertPackageToItem(packageId, boxId) {
+        return this.request(`/packages/${packageId}/convert-to-item?box_id=${boxId}`, {
+            method: 'POST'
+        });
+    }
+
+    async convertBoxToPackage(boxId) {
+        return this.request(`/boxes/${boxId}/convert-to-package`, {
             method: 'POST'
         });
     }

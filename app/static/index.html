@@ -43,9 +43,9 @@
                         </a>
                     </li>
                     <li>
-                        <a href="#" data-page="orders">
-                            <i class="fas fa-clipboard-list"></i>
-                            <span>Orders</span>
+                        <a href="#" data-page="packages">
+                            <i class="fas fa-cubes"></i>
+                            <span>Packages</span>
                         </a>
                     </li>
                     <li class="manager-only">
@@ -121,12 +121,12 @@
                     </div>
                     
                     <div class="stat-card">
-                        <div class="icon orders">
-                            <i class="fas fa-clipboard-list"></i>
+                        <div class="icon packages">
+                            <i class="fas fa-cubes"></i>
                         </div>
                         <div class="info">
-                            <h3 id="stat-orders">0</h3>
-                            <p>Active Orders</p>
+                            <h3 id="stat-packages">0</h3>
+                            <p>Active Packages</p>
                         </div>
                     </div>
                     
@@ -259,19 +259,19 @@
                 </div>
             </div>
 
-            <!-- Orders Page -->
-            <div id="page-orders" class="page hidden">
+            <!-- Packages Page -->
+            <div id="page-packages" class="page hidden">
                 <div class="page-header">
-                    <h2>Orders</h2>
+                    <h2>Packages</h2>
                     <div class="header-actions">
-                        <button class="btn btn-primary manager-only" onclick="showOrderModal()">
-                            <i class="fas fa-plus"></i> New Order
+                        <button class="btn btn-primary manager-only" onclick="showPackageModal()">
+                            <i class="fas fa-plus"></i> New Package
                         </button>
                     </div>
                 </div>
                 
                 <div class="filters">
-                    <select id="orderStatusFilter" class="status-select" onchange="filterOrders()">
+                    <select id="packageStatusFilter" class="status-select" onchange="filterPackages()">
                         <option value="">All Statuses</option>
                         <option value="new">New</option>
                         <option value="sourcing">Sourcing</option>
@@ -295,7 +295,7 @@
                                     <th>Scan</th>
                                 </tr>
                             </thead>
-                            <tbody id="ordersTable"></tbody>
+                            <tbody id="packagesTable"></tbody>
                         </table>
                     </div>
                 </div>
@@ -1038,12 +1038,12 @@
                     <button type="button" class="btn btn-lg btn-success" onclick="createNewItem()">
                         <i class="fas fa-cube"></i> Item
                     </button>
-                    <button type="button" class="btn btn-lg btn-warning" onclick="createNewOrder()">
-                        <i class="fas fa-clipboard-list"></i> Order
+                    <button type="button" class="btn btn-lg btn-warning" onclick="createNewPackage()">
+                        <i class="fas fa-cubes"></i> Package
                     </button>
                 </div>
                 <p class="unknown-barcode-hint">
-                    <i class="fas fa-barcode"></i> Or scan <code>TYPE:BOX</code>, <code>TYPE:ITEM</code>, or <code>TYPE:ORDER</code>
+                    <i class="fas fa-barcode"></i> Or scan <code>TYPE:BOX</code>, <code>TYPE:ITEM</code>, or <code>TYPE:PACKAGE</code>
                 </p>
             </div>
             <div class="modal-footer">
@@ -1052,68 +1052,68 @@
         </div>
     </div>
 
-    <!-- Order Modal -->
-    <div id="orderModal" class="modal-overlay">
+    <!-- Package Modal -->
+    <div id="packageModal" class="modal-overlay">
         <div class="modal">
             <div class="modal-header">
-                <h3 id="orderModalTitle">New Order</h3>
-                <button class="modal-close" onclick="closeOrderModal()">&times;</button>
+                <h3 id="packageModalTitle">New Package</h3>
+                <button class="modal-close" onclick="closePackageModal()">&times;</button>
             </div>
-            <form id="orderForm" onsubmit="saveOrder(event)">
+            <form id="packageForm" onsubmit="savePackage(event)">
                 <div class="modal-body">
-                    <input type="hidden" id="orderId">
+                    <input type="hidden" id="packageId">
                     <div class="form-group">
-                        <label for="orderBarcode">Barcode *</label>
-                        <input type="text" id="orderBarcode" required>
+                        <label for="packageBarcode">Barcode *</label>
+                        <input type="text" id="packageBarcode" required>
                     </div>
                     <div class="form-group">
-                        <label for="orderName">Name *</label>
-                        <input type="text" id="orderName" required>
+                        <label for="packageName">Name *</label>
+                        <input type="text" id="packageName" required>
                     </div>
                     <div class="form-group">
-                        <label for="orderDescription">Description</label>
-                        <textarea id="orderDescription" rows="2"></textarea>
+                        <label for="packageDescription">Description</label>
+                        <textarea id="packageDescription" rows="2"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn" onclick="closeOrderModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Order</button>
+                    <button type="button" class="btn" onclick="closePackageModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Package</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Order Detail Modal -->
-    <div id="orderDetailModal" class="modal-overlay">
+    <!-- Package Detail Modal -->
+    <div id="packageDetailModal" class="modal-overlay">
         <div class="modal modal-lg">
             <div class="modal-header">
-                <h3 id="orderDetailTitle">Order Details</h3>
-                <button class="modal-close" onclick="closeOrderDetailModal()">&times;</button>
+                <h3 id="packageDetailTitle">Package Details</h3>
+                <button class="modal-close" onclick="closePackageDetailModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="order-detail-header">
-                    <div class="order-info">
-                        <div class="order-barcode-display">
-                            <svg id="orderDetailBarcodeSvg"></svg>
-                            <code id="orderDetailBarcode"></code>
+                <div class="package-detail-header">
+                    <div class="package-info">
+                        <div class="package-barcode-display">
+                            <svg id="packageDetailBarcodeSvg"></svg>
+                            <code id="packageDetailBarcode"></code>
                         </div>
-                        <div class="order-meta">
-                            <p><strong>Name:</strong> <span id="orderDetailName"></span></p>
-                            <p><strong>Description:</strong> <span id="orderDetailDescription">-</span></p>
-                            <p><strong>Status:</strong> <span id="orderDetailStatus" class="status-badge"></span></p>
-                            <p><strong>Created:</strong> <span id="orderDetailCreated"></span></p>
+                        <div class="package-meta">
+                            <p><strong>Name:</strong> <span id="packageDetailName"></span></p>
+                            <p><strong>Description:</strong> <span id="packageDetailDescription">-</span></p>
+                            <p><strong>Status:</strong> <span id="packageDetailStatus" class="status-badge"></span></p>
+                            <p><strong>Created:</strong> <span id="packageDetailCreated"></span></p>
                         </div>
                     </div>
                 </div>
                 
-                <div class="order-items-section">
-                    <h4><i class="fas fa-cube"></i> Order Items</h4>
-                    <div id="orderItemsEmpty" class="empty-state">
+                <div class="package-items-section">
+                    <h4><i class="fas fa-cube"></i> Package Items</h4>
+                    <div id="packageItemsEmpty" class="empty-state">
                         <i class="fas fa-inbox"></i>
-                        <p>No items in this order yet</p>
-                        <p class="hint">Scan order barcode, then <code>ACTION:ADD</code>, then item barcode</p>
+                        <p>No items in this package yet</p>
+                        <p class="hint">Scan package barcode, then <code>OP:ADD</code>, then item barcode</p>
                     </div>
-                    <table id="orderItemsTable" class="hidden">
+                    <table id="packageItemsTable" class="hidden">
                         <thead>
                             <tr>
                                 <th>Item</th>
@@ -1124,7 +1124,7 @@
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="orderItemsTableBody"></tbody>
+                        <tbody id="packageItemsTableBody"></tbody>
                     </table>
                 </div>
                 
@@ -1142,15 +1142,15 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" id="orderDetailFooter">
-                <button type="button" class="btn" onclick="closeOrderDetailModal()">Close</button>
-                <button type="button" class="btn btn-warning" id="btnCancelOrder" onclick="cancelCurrentOrder()">
-                    <i class="fas fa-ban"></i> Cancel Order
+            <div class="modal-footer" id="packageDetailFooter">
+                <button type="button" class="btn" onclick="closePackageDetailModal()">Close</button>
+                <button type="button" class="btn btn-warning" id="btnCancelPackage" onclick="cancelCurrentPackage()">
+                    <i class="fas fa-ban"></i> Cancel Package
                 </button>
-                <button type="button" class="btn btn-success" id="btnPackOrder" onclick="packCurrentOrder()">
-                    <i class="fas fa-box"></i> Pack Order
+                <button type="button" class="btn btn-success" id="btnPackPackage" onclick="packCurrentPackage()">
+                    <i class="fas fa-box"></i> Pack
                 </button>
-                <button type="button" class="btn btn-primary" id="btnCompleteOrder" onclick="completeCurrentOrder()">
+                <button type="button" class="btn btn-primary" id="btnCompletePackage" onclick="completeCurrentPackage()">
                     <i class="fas fa-check"></i> Complete
                 </button>
             </div>
@@ -1262,13 +1262,13 @@
     <div class="hints-widget">
         <div class="hints-container">
             <div class="hint active"><i class="fas fa-barcode"></i> Scan barcode anytime to search</div>
-            <div class="hint"><i class="fas fa-arrows-alt"></i> Item → <code>ACTION:MOVE</code> → Box</div>
-            <div class="hint"><i class="fas fa-plus-circle"></i> Item → <code>ACTION:ADD</code> → Qty to add</div>
-            <div class="hint"><i class="fas fa-minus-circle"></i> Item → <code>ACTION:TAKE</code> → Qty to take</div>
-            <div class="hint"><i class="fas fa-clipboard-list"></i> Order → <code>ACTION:ADD</code> → Item → Qty</div>
-            <div class="hint"><i class="fas fa-check-circle"></i> <code>ACTION:DONE</code> to pack order</div>
-            <div class="hint"><i class="fas fa-times-circle"></i> <code>ACTION:CANCEL</code> or ESC to cancel</div>
-            <div class="hint"><i class="fas fa-question-circle"></i> Unknown? → <code>TYPE:BOX</code> / <code>TYPE:ITEM</code> / <code>TYPE:ORDER</code></div>
+            <div class="hint"><i class="fas fa-arrows-alt"></i> Item → <code>OP:MOVE</code> → Box</div>
+            <div class="hint"><i class="fas fa-plus-circle"></i> Item → <code>OP:ADD</code> → Qty to add</div>
+            <div class="hint"><i class="fas fa-minus-circle"></i> Item → <code>OP:TAKE</code> → Qty to take</div>
+            <div class="hint"><i class="fas fa-cubes"></i> Package → <code>OP:ADD</code> → Item → Qty</div>
+            <div class="hint"><i class="fas fa-check-circle"></i> <code>ACT:OK</code> to pack package</div>
+            <div class="hint"><i class="fas fa-times-circle"></i> <code>ACT:CANCEL</code> or ESC to cancel</div>
+            <div class="hint"><i class="fas fa-question-circle"></i> Unknown? → <code>TYPE:BOX</code> / <code>TYPE:ITEM</code> / <code>TYPE:PACKAGE</code></div>
         </div>
         <a href="/static/action-codes.html" target="_blank" class="print-codes-link" title="Print action code barcodes">
             <i class="fas fa-print"></i>
@@ -1276,6 +1276,7 @@
     </div>
 
     <script src="/static/js/api.js"></script>
+    <script src="/static/js/code-chains.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

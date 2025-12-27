@@ -4,7 +4,7 @@ let currentUser = null;
 let warehouses = [];
 let boxes = [];
 let items = [];
-let orders = [];
+let packages = [];
 let inventoryChecks = [];
 let activeCheck = null;
 let currentCheckDetail = null;
@@ -14,19 +14,6 @@ let currentCheckItem = null;
 let barcodeBuffer = '';
 let barcodeTimeout = null;
 const BARCODE_TIMEOUT = 100; // ms between keystrokes for barcode scanner
-
-// Action mode state
-const ACTION_CODES = {
-    'ACTION:MOVE': 'move',
-    'ACTION:ADD': 'add',
-    'ACTION:TAKE': 'take',
-    'ACTION:DONE': 'done',
-    'ACTION:CANCEL': 'cancel',
-    'ACTION:CLEAR': 'cancel',   // Alias
-    'TYPE:BOX': 'type_box',
-    'TYPE:ITEM': 'type_item',
-    'TYPE:ORDER': 'type_order'
-};
 
 // Pending new barcode - when unknown barcode scanned, waiting for type
 let pendingNewBarcode = null;
@@ -39,6 +26,7 @@ function normalizeActionCode(barcode) {
 }
 
 // Check if a barcode is an action code
+// Uses ACTION_CODES from code-chains.js module
 function isActionCode(barcode) {
     if (!barcode) return false;
     const normalized = normalizeActionCode(barcode);
@@ -51,20 +39,17 @@ function getActionFromCode(barcode) {
     return ACTION_CODES[normalized];
 }
 
-// Code Chain state - tracks the 3-step workflow: Item/Order/Box > Action > Target
+// Code Chain state - tracks the 3-step workflow: Item/Package/Box > Action > Target
 let codeChain = {
     item: null,      // { id, name, barcode, quantity, box_id }
-    order: null,     // { id, name, barcode, status }
+    package: null,   // { id, name, barcode, status }
     box: null,       // { id, name, barcode, warehouse_id }
-    action: null,    // 'move' | 'add' | 'take' | 'done' | 'cancel'
-    target: null     // box object for move, item for order add, or quantity number
+    action: null,    // 'move' | 'add' | 'take' | 'ok' | 'cancel'
+    target: null     // box object for move, item for package add, or quantity number
 };
 
-// Current order being viewed in detail modal
-let currentOrderDetail = null;
-
-// Legacy alias for backward compatibility
-let pendingAction = null;  // Will be kept in sync with codeChain
+// Current package being viewed in detail modal
+let currentPackageDetail = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
@@ -76,10 +61,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
         currentUser = await api.getMe();
+        if (!currentUser || !currentUser.username) {
+            throw new Error('Invalid user data');
+        }
         initializeApp();
     } catch (error) {
         console.error('Failed to get user:', error);
-        api.logout();
+        // Clear token and redirect to login
+        localStorage.removeItem('token');
+        window.location.href = '/static/login.html';
+        return;
     }
 });
 
@@ -395,11 +386,11 @@ async function processScan(barcode) {
     if (codeChain.item && codeChain.action === 'move') {
         // Step 3: Expecting a target box barcode for MOVE
         await handleTargetScan(trimmedBarcode);
-    } else if (codeChain.order && codeChain.action === 'add') {
-        // Order flow: expecting item barcode to add to order
-        await handleOrderItemScan(trimmedBarcode);
+    } else if (codeChain.package && codeChain.action === 'add') {
+        // Package flow: expecting item barcode to add to package
+        await handlePackageItemScan(trimmedBarcode);
     } else {
-        // Step 1: New item/box/order search (resets chain)
+        // Step 1: New item/box/package search (resets chain)
         await searchByBarcode(trimmedBarcode);
     }
 }
@@ -407,14 +398,42 @@ async function processScan(barcode) {
 function handleActionCode(action) {
     const isManager = ['administrator', 'manager'].includes(currentUser.role);
     
-    // Handle TYPE:BOX, TYPE:ITEM, TYPE:ORDER for pending unknown barcode FIRST
-    // These need to be checked before other actions to avoid clearing pendingNewBarcode
-    if (action === 'type_box' || action === 'type_item' || action === 'type_order') {
+    // Handle TYPE:BOX, TYPE:ITEM, TYPE:PACKAGE
+    // Can be used for: 1) creating new entities from unknown barcodes, 2) converting entities with OP:CHANGE
+    if (action === 'type_box' || action === 'type_item' || action === 'type_package') {
         if (!isManager) {
-            showAlert('You do not have permission to create items/boxes/orders', 'danger');
+            showAlert('You do not have permission to create or convert items/boxes/packages', 'danger');
             return;
         }
         
+        // Check if we're in CHANGE mode first
+        if (codeChain.action === 'change') {
+            if (codeChain.package) {
+                if (action === 'type_box') {
+                    convertPackageToBox(codeChain.package);
+                    return;
+                } else if (action === 'type_item') {
+                    convertPackageToItem(codeChain.package);
+                    return;
+                } else {
+                    showAlert('Package is already a package', 'warning');
+                    return;
+                }
+            } else if (codeChain.box) {
+                if (action === 'type_package') {
+                    convertBoxToPackage(codeChain.box);
+                    return;
+                } else if (action === 'type_item') {
+                    showAlert('Boxes cannot be converted to items', 'warning');
+                    return;
+                } else {
+                    showAlert('Box is already a box', 'warning');
+                    return;
+                }
+            }
+        }
+        
+        // Otherwise, check for pending unknown barcode (creating new entity)
         // pendingNewBarcode can be a string (from unknown barcode prompt) or an object (from createNewItem)
         const barcodeValue = typeof pendingNewBarcode === 'string' ? pendingNewBarcode : (pendingNewBarcode?.barcode || null);
         
@@ -425,23 +444,16 @@ function handleActionCode(action) {
             } else if (action === 'type_item') {
                 createNewItem(barcodeValue);
             } else {
-                createNewOrder(barcodeValue);
+                createNewPackage(barcodeValue);
             }
             return;
         } else {
-            showAlert('Scan an unknown barcode first, then scan TYPE:BOX, TYPE:ITEM, or TYPE:ORDER', 'warning');
+            showAlert('Scan an unknown barcode first, then scan TYPE:BOX, TYPE:ITEM, or TYPE:PACKAGE', 'warning');
             return;
         }
     }
     
     if (action === 'cancel') {
-        // Check if we have an order in the chain that should be cancelled
-        if (codeChain.order && !codeChain.action) {
-            if (isManager) {
-                cancelOrderFromChain();
-                return;
-            }
-        }
         clearCodeChain();
         pendingNewBarcode = null;
         closeUnknownBarcodePrompt();
@@ -449,14 +461,14 @@ function handleActionCode(action) {
         return;
     }
     
-    // Handle DONE action
-    if (action === 'done') {
-        if (codeChain.order) {
-            // Pack the order
+    // Handle OK action (was DONE)
+    if (action === 'ok' || action === 'done') {
+        if (codeChain.package) {
+            // Pack the package
             if (isManager) {
-                packOrderFromChain();
+                packPackageFromChain();
             } else {
-                showAlert('You do not have permission to pack orders', 'danger');
+                showAlert('You do not have permission to pack packages', 'danger');
             }
             return;
         }
@@ -466,7 +478,7 @@ function handleActionCode(action) {
             markReturnsDone();
             return;
         }
-        showAlert('Scan an order first, then ACTION:DONE to pack it', 'warning');
+        showAlert('Scan a package first, then ACT:OK to pack it', 'warning');
         return;
     }
     
@@ -475,37 +487,35 @@ function handleActionCode(action) {
         return;
     }
     
-    // Handle ADD action - can work with items or orders
+    // Handle ADD action - can work with items or packages
     if (action === 'add') {
-        if (codeChain.order) {
-            // Order flow: waiting for item to add
+        if (codeChain.package) {
+            // Package flow: waiting for item to add
             codeChain.action = 'add';
             updateCodeChainUI();
             closeBarcodeResultModal();
-            closeOrderDetailModal();
-            showAlert('Scan an item barcode to add to this order', 'info');
+            closePackageDetailModal();
+            showAlert('Scan an item barcode to add to this package', 'info');
             return;
         } else if (codeChain.item) {
             // Item flow: add/store quantity
             codeChain.action = 'add';
-            pendingAction = { item: codeChain.item, action: 'add' };
             updateCodeChainUI();
             closeBarcodeResultModal();
             showQuantityPrompt('add', codeChain.item);
             return;
         }
-        showAlert('Scan an item or order first, then ACTION:ADD', 'warning');
+        showAlert('Scan an item or package first, then OP:ADD', 'warning');
         return;
     }
     
     // Handle TAKE action - only for items
     if (action === 'take') {
         if (!codeChain.item) {
-            showAlert('Scan an item first, then ACTION:TAKE', 'warning');
+            showAlert('Scan an item first, then OP:TAKE', 'warning');
             return;
         }
         codeChain.action = 'take';
-        pendingAction = { item: codeChain.item, action: 'take' };
         updateCodeChainUI();
         closeBarcodeResultModal();
         showQuantityPrompt('take', codeChain.item);
@@ -523,13 +533,39 @@ function handleActionCode(action) {
             return;
         }
         if (!codeChain.item) {
-            showAlert('Scan an item or box first, then ACTION:MOVE', 'warning');
+            showAlert('Scan an item or box first, then OP:MOVE', 'warning');
             return;
         }
         codeChain.action = 'move';
-        pendingAction = { item: codeChain.item, action: 'move' };
         updateCodeChainUI();
         closeBarcodeResultModal();
+        return;
+    }
+    
+    // Handle CHANGE action - convert entity types
+    if (action === 'change') {
+        if (codeChain.package) {
+            // Package can become Box or Item
+            codeChain.action = 'change';
+            updateCodeChainUI();
+            closeBarcodeResultModal();
+            closePackageDetailModal();
+            showAlert('Scan TYPE:BOX or TYPE:ITEM to convert this package', 'info');
+            return;
+        }
+        if (codeChain.box) {
+            // Box can become Package
+            codeChain.action = 'change';
+            updateCodeChainUI();
+            closeBarcodeResultModal();
+            showAlert('Scan TYPE:PACKAGE to convert this box', 'info');
+            return;
+        }
+        if (codeChain.item) {
+            showAlert('Items cannot be converted to other types', 'warning');
+            return;
+        }
+        showAlert('Scan a package or box first, then OP:CHANGE', 'warning');
         return;
     }
 }
@@ -608,13 +644,186 @@ async function executeTake(item, quantity) {
     }
 }
 
-function cancelPendingAction() {
+// ==================== ENTITY CONVERSION (OP:CHANGE) ====================
+
+async function convertPackageToBox(pkg) {
+    // Need to select a warehouse for the new box
+    try {
+        const warehouses = await api.getWarehouses();
+        if (warehouses.length === 0) {
+            showAlert('No warehouses available. Create a warehouse first.', 'danger');
+            clearCodeChain();
+            return;
+        }
+        
+        // Show warehouse selection modal
+        showConversionWarehouseModal(pkg, warehouses);
+    } catch (error) {
+        showAlert(`Failed to load warehouses: ${error.message}`, 'danger');
+        clearCodeChain();
+    }
+}
+
+function showConversionWarehouseModal(pkg, warehouses) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal-overlay" id="conversionWarehouseModal" onclick="closeConversionWarehouseModal(event)">
+            <div class="modal-content" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3><i class="fas fa-exchange-alt"></i> Convert Package to Box</h3>
+                    <button class="modal-close" onclick="closeConversionWarehouseModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>Converting <strong>"${pkg.name}"</strong> to a box.</p>
+                    <p>Select the warehouse for the new box:</p>
+                    <div class="form-group">
+                        <select id="conversionWarehouseSelect" class="form-control">
+                            ${warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeConversionWarehouseModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="executePackageToBox(${pkg.id})">
+                        <i class="fas fa-box"></i> Convert to Box
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existing = document.getElementById('conversionWarehouseModal');
+    if (existing) existing.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeConversionWarehouseModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    const modal = document.getElementById('conversionWarehouseModal');
+    if (modal) modal.remove();
+}
+
+async function executePackageToBox(packageId) {
+    const warehouseId = document.getElementById('conversionWarehouseSelect').value;
+    closeConversionWarehouseModal();
+    
+    try {
+        const result = await api.convertPackageToBox(packageId, warehouseId);
+        showCodeChainSuccess(result.message);
+        await preloadData();
+        if (!document.getElementById('page-packages').classList.contains('hidden')) {
+            await loadPackages();
+        }
+        if (!document.getElementById('page-boxes').classList.contains('hidden')) {
+            await loadBoxes();
+        }
+    } catch (error) {
+        showAlert(`Failed to convert package: ${error.message}`, 'danger');
+    }
+    clearCodeChain();
+}
+
+async function convertPackageToItem(pkg) {
+    // Need to select a box for the new item
+    try {
+        const boxes = await api.getBoxes();
+        if (boxes.length === 0) {
+            showAlert('No boxes available. Create a box first.', 'danger');
+            clearCodeChain();
+            return;
+        }
+        
+        // Show box selection modal
+        showConversionBoxModal(pkg, boxes);
+    } catch (error) {
+        showAlert(`Failed to load boxes: ${error.message}`, 'danger');
+        clearCodeChain();
+    }
+}
+
+function showConversionBoxModal(pkg, boxes) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal-overlay" id="conversionBoxModal" onclick="closeConversionBoxModal(event)">
+            <div class="modal-content" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3><i class="fas fa-exchange-alt"></i> Convert Package to Item</h3>
+                    <button class="modal-close" onclick="closeConversionBoxModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>Converting <strong>"${pkg.name}"</strong> to an item (product).</p>
+                    <p>The package will be packed and a new item will be created.</p>
+                    <p>Select the box where the new item will be stored:</p>
+                    <div class="form-group">
+                        <select id="conversionBoxSelect" class="form-control">
+                            ${boxes.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeConversionBoxModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="executePackageToItem(${pkg.id})">
+                        <i class="fas fa-cube"></i> Convert to Item
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existing = document.getElementById('conversionBoxModal');
+    if (existing) existing.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeConversionBoxModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    const modal = document.getElementById('conversionBoxModal');
+    if (modal) modal.remove();
+}
+
+async function executePackageToItem(packageId) {
+    const boxId = document.getElementById('conversionBoxSelect').value;
+    closeConversionBoxModal();
+    
+    try {
+        const result = await api.convertPackageToItem(packageId, boxId);
+        showCodeChainSuccess(result.message);
+        await preloadData();
+        if (!document.getElementById('page-packages').classList.contains('hidden')) {
+            await loadPackages();
+        }
+        if (!document.getElementById('page-items').classList.contains('hidden')) {
+            await loadItems();
+        }
+    } catch (error) {
+        showAlert(`Failed to convert package: ${error.message}`, 'danger');
+    }
+    clearCodeChain();
+}
+
+async function convertBoxToPackage(box) {
+    try {
+        const result = await api.convertBoxToPackage(box.id);
+        showCodeChainSuccess(result.message);
+        await preloadData();
+        if (!document.getElementById('page-boxes').classList.contains('hidden')) {
+            await loadBoxes();
+        }
+        if (!document.getElementById('page-packages').classList.contains('hidden')) {
+            await loadPackages();
+        }
+    } catch (error) {
+        showAlert(`Failed to convert box: ${error.message}`, 'danger');
+    }
     clearCodeChain();
 }
 
 function clearCodeChain() {
-    codeChain = { item: null, order: null, box: null, action: null, target: null };
-    pendingAction = null;
+    codeChain = { item: null, package: null, box: null, action: null, target: null };
     updateCodeChainUI();
     closeQuantityPrompt();
 }
@@ -623,7 +832,7 @@ function updateCodeChainUI() {
     let chainBar = document.getElementById('codeChainBar');
     
     // If nothing in chain, hide the bar
-    if (!codeChain.item && !codeChain.order && !codeChain.box && !codeChain.action && !codeChain.target) {
+    if (!codeChain.item && !codeChain.package && !codeChain.box && !codeChain.action && !codeChain.target) {
         if (chainBar) {
             chainBar.classList.remove('visible');
         }
@@ -638,13 +847,13 @@ function updateCodeChainUI() {
         document.body.appendChild(chainBar);
     }
     
-    // Determine if this is an order chain, box chain, or item chain
-    const isOrderChain = codeChain.order !== null;
+    // Determine if this is a package chain, box chain, or item chain
+    const isPackageChain = codeChain.package !== null;
     const isBoxChain = codeChain.box !== null;
     
     // Build chain steps
-    let step1Label = isOrderChain ? 'Order' : (isBoxChain ? 'Box' : 'Item');
-    const firstItem = isOrderChain ? codeChain.order : (isBoxChain ? codeChain.box : codeChain.item);
+    let step1Label = isPackageChain ? 'Package' : (isBoxChain ? 'Box' : 'Item');
+    const firstItem = isPackageChain ? codeChain.package : (isBoxChain ? codeChain.box : codeChain.item);
     const itemStep = firstItem 
         ? `<span class="chain-value">${escapeHtml(firstItem.name || firstItem.barcode)}</span>` 
         : '<span class="chain-placeholder">?</span>';
@@ -657,14 +866,14 @@ function updateCodeChainUI() {
     let targetValue = '<span class="chain-placeholder">?</span>';
     if (codeChain.target) {
         if (typeof codeChain.target === 'object') {
-            // Box object for move, or item for order
+            // Box object for move, or item for package
             targetValue = `<span class="chain-value">${escapeHtml(codeChain.target.name)}</span>`;
         } else {
             // Number for add/take
             targetValue = `<span class="chain-value">${codeChain.target}</span>`;
         }
     } else if (codeChain.action === 'add') {
-        targetLabel = isOrderChain ? 'Item' : 'Qty';
+        targetLabel = isPackageChain ? 'Item' : 'Qty';
     } else if (codeChain.action === 'take') {
         targetLabel = 'Qty';
     } else if (codeChain.action === 'move') {
@@ -720,11 +929,6 @@ function showCodeChainSuccess(message) {
     setTimeout(() => {
         clearCodeChain();
     }, 3000);
-}
-
-// Legacy function for backward compatibility
-function updateActionStatus() {
-    updateCodeChainUI();
 }
 
 // Quantity Prompt for Add/Take
@@ -856,8 +1060,7 @@ async function searchByBarcode(barcode) {
             const item = await api.getItemByBarcode(barcode);
             if (item) {
                 // Start new Code Chain with this item (Step 1)
-                codeChain = { item: item, order: null, box: null, action: null, target: null };
-                pendingAction = { item: item, action: null }; // Legacy sync
+                codeChain = { item: item, package: null, box: null, action: null, target: null };
                 updateCodeChainUI();
                 showBarcodeResult('item', item);
                 return;
@@ -879,29 +1082,27 @@ async function searchByBarcode(barcode) {
                     return;
                 }
                 // Start new Code Chain with this box (Step 1)
-                codeChain = { item: null, order: null, box: box, action: null, target: null };
-                pendingAction = null;
+                codeChain = { item: null, package: null, box: box, action: null, target: null };
                 updateCodeChainUI();
                 showBarcodeResult('box', box);
                 return;
             }
         } catch (e) {
-            // Box not found, try order
+            // Box not found, try package
         }
 
-        // Try to find an order
+        // Try to find a package
         try {
-            const order = await api.getOrderByBarcode(barcode);
-            if (order) {
-                // Start new Code Chain with this order
-                codeChain = { item: null, order: order, box: null, action: null, target: null };
-                pendingAction = null;
+            const pkg = await api.getPackageByBarcode(barcode);
+            if (pkg) {
+                // Start new Code Chain with this package
+                codeChain = { item: null, package: pkg, box: null, action: null, target: null };
                 updateCodeChainUI();
-                showBarcodeResult('order', order);
+                showBarcodeResult('package', pkg);
                 return;
             }
         } catch (e) {
-            // Order not found either
+            // Package not found either
         }
 
         // Unknown barcode - prompt user for type (manager only)
@@ -909,7 +1110,7 @@ async function searchByBarcode(barcode) {
         if (isManager) {
             showUnknownBarcodePrompt(barcode);
         } else {
-            showAlert(`No item, box, or order found with barcode: ${barcode}`, 'warning');
+            showAlert(`No item, box, or package found with barcode: ${barcode}`, 'warning');
         }
     } catch (error) {
         showAlert(`Error searching for barcode: ${error.message}`, 'danger');
@@ -1150,8 +1351,8 @@ function showBarcodeResult(type, data) {
                 <i class="fas fa-eye"></i> View Items
             </button>
         `;
-    } else if (type === 'order') {
-        title.innerHTML = `<i class="fas fa-clipboard-list"></i> Order Found`;
+    } else if (type === 'package') {
+        title.innerHTML = `<i class="fas fa-shipping-fast"></i> Package Found`;
         content.innerHTML = `
             <div class="result-details">
                 <div class="result-row">
@@ -1168,24 +1369,24 @@ function showBarcodeResult(type, data) {
                 </div>
                 <div class="result-row">
                     <span class="label">Items:</span>
-                    <span class="value"><strong>${data.order_items ? data.order_items.length : 0}</strong> item(s)</span>
+                    <span class="value"><strong>${data.package_items ? data.package_items.length : 0}</strong> item(s)</span>
                 </div>
             </div>
-            <div class="order-scan-hint">
-                <p><i class="fas fa-info-circle"></i> Scan <code>ACTION:ADD</code> then item barcode to add items</p>
+            <div class="package-scan-hint">
+                <p><i class="fas fa-info-circle"></i> Scan <code>OP:ADD</code> then item barcode to add items</p>
             </div>
         `;
         
         const isManager = ['administrator', 'manager'].includes(currentUser.role);
         let actionButtons = `
-            <button class="btn btn-primary" onclick="closeBarcodeResultModal(); showOrderDetail(${data.id})">
+            <button class="btn btn-primary" onclick="closeBarcodeResultModal(); showPackageDetail(${data.id})">
                 <i class="fas fa-eye"></i> View Details
             </button>
         `;
         
-        if (isManager && data.status !== 'done' && data.status !== 'cancelled') {
+        if (isManager && data.status !== 'packed' && data.status !== 'cancelled') {
             actionButtons += `
-                <button class="btn btn-success" onclick="closeBarcodeResultModal(); packOrder(${data.id})">
+                <button class="btn btn-success" onclick="closeBarcodeResultModal(); packPackage(${data.id})">
                     <i class="fas fa-box"></i> Pack
                 </button>
             `;
@@ -1247,8 +1448,8 @@ async function loadPageData(page) {
         case 'items':
             await loadItems();
             break;
-        case 'orders':
-            await loadOrders();
+        case 'packages':
+            await loadPackages();
             break;
         case 'checks':
             await loadChecks();
@@ -1268,20 +1469,20 @@ async function loadPageData(page) {
 // Dashboard
 async function loadDashboard() {
     try {
-        const [warehouseData, boxData, itemData, orderData] = await Promise.all([
+        const [warehouseData, boxData, itemData, packageData] = await Promise.all([
             api.getWarehouses(),
             api.getBoxes(),
             api.getItems(),
-            api.getOrders()
+            api.getPackages()
         ]);
 
         document.getElementById('stat-warehouses').textContent = warehouseData.length;
         document.getElementById('stat-boxes').textContent = boxData.length;
         document.getElementById('stat-items').textContent = itemData.reduce((sum, item) => sum + item.quantity, 0);
         
-        // Count active orders (not done or cancelled)
-        const activeOrders = orderData.filter(o => !['done', 'cancelled'].includes(o.status));
-        document.getElementById('stat-orders').textContent = activeOrders.length;
+        // Count active packages (not packed or cancelled)
+        const activePackages = packageData.filter(p => !['packed', 'cancelled'].includes(p.status));
+        document.getElementById('stat-packages').textContent = activePackages.length;
 
         if (currentUser.role === 'administrator') {
             const userData = await api.getUsers();
@@ -1413,7 +1614,12 @@ function editWarehouse(id) {
 }
 
 async function deleteWarehouse(id) {
-    if (!confirm('Are you sure you want to delete this warehouse?')) return;
+    const confirmed = await showConfirm('Are you sure you want to delete this warehouse?', {
+        title: 'Delete Warehouse',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
         await api.deleteWarehouse(id);
@@ -1580,7 +1786,12 @@ function editBox(id) {
 }
 
 async function deleteBox(id) {
-    if (!confirm('Are you sure you want to delete this box?')) return;
+    const confirmed = await showConfirm('Are you sure you want to delete this box?', {
+        title: 'Delete Box',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
         await api.deleteBox(id);
@@ -1602,7 +1813,7 @@ function showMoveBoxModal(id) {
 }
 
 function showMoveBoxModalFromChain(box) {
-    // Called from code chain (box scanned + ACTION:MOVE)
+    // Called from code chain (box scanned + OP:MOVE)
     document.getElementById('moveBoxId').value = box.id;
     document.getElementById('moveBoxName').textContent = box.name;
     document.getElementById('moveBoxTarget').value = '';
@@ -2056,7 +2267,12 @@ function editItem(id) {
 }
 
 async function deleteItem(id) {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+    const confirmed = await showConfirm('Are you sure you want to delete this item?', {
+        title: 'Delete Item',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
         await api.deleteItem(id);
@@ -2629,7 +2845,12 @@ async function completeCurrentCheck() {
 }
 
 async function completeCheckById(checkId) {
-    if (!confirm('Complete this inventory check? Make sure all items have been counted.')) return;
+    const confirmed = await showConfirm('Complete this inventory check? Make sure all items have been counted.', {
+        title: 'Complete Check',
+        confirmText: 'Complete',
+        type: 'info'
+    });
+    if (!confirmed) return;
     
     try {
         await api.completeCheck(checkId);
@@ -2654,7 +2875,12 @@ async function cancelCurrentCheck() {
 }
 
 async function cancelCheckById(checkId) {
-    if (!confirm('Cancel this inventory check? All progress will be lost.')) return;
+    const confirmed = await showConfirm('Cancel this inventory check? All progress will be lost.', {
+        title: 'Cancel Check',
+        confirmText: 'Cancel Check',
+        type: 'warning'
+    });
+    if (!confirmed) return;
     
     try {
         await api.cancelCheck(checkId);
@@ -2669,7 +2895,12 @@ async function cancelCheckById(checkId) {
 }
 
 async function deleteCheck(checkId) {
-    if (!confirm('Delete this inventory check? This cannot be undone.')) return;
+    const confirmed = await showConfirm('Delete this inventory check? This cannot be undone.', {
+        title: 'Delete Check',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
     
     try {
         await api.deleteCheck(checkId);
@@ -2882,7 +3113,12 @@ async function saveUser(e) {
 }
 
 async function deleteUser(id) {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    const confirmed = await showConfirm('Are you sure you want to delete this user?', {
+        title: 'Delete User',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
         await api.deleteUser(id);
@@ -2894,19 +3130,127 @@ async function deleteUser(id) {
 }
 
 // Utility functions
-function showAlert(message, type = 'info') {
+function showAlert(message, type = 'info', duration = 4000) {
     const alertsContainer = document.getElementById('alerts');
     const alert = document.createElement('div');
-    alert.className = `alert alert-${type}`;
+    alert.className = `alert alert-${type} alert-toast`;
+    
+    // Icon mapping
+    const icons = {
+        success: 'check-circle',
+        danger: 'exclamation-triangle',
+        warning: 'exclamation-circle',
+        info: 'info-circle'
+    };
+    
     alert.innerHTML = `
-        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'danger' ? 'exclamation-circle' : 'info-circle'}"></i>
-        ${escapeHtml(message)}
+        <div class="alert-icon">
+            <i class="fas fa-${icons[type] || 'info-circle'}"></i>
+        </div>
+        <div class="alert-content">
+            <span class="alert-message">${escapeHtml(message)}</span>
+        </div>
+        <button class="alert-close" onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="alert-progress"></div>
     `;
+    
     alertsContainer.appendChild(alert);
-
+    
+    // Trigger animation
+    requestAnimationFrame(() => {
+        alert.classList.add('alert-show');
+    });
+    
+    // Start progress bar animation
+    const progressBar = alert.querySelector('.alert-progress');
+    progressBar.style.animationDuration = `${duration}ms`;
+    
+    // Auto remove
     setTimeout(() => {
-        alert.remove();
-    }, 5000);
+        alert.classList.add('alert-hide');
+        setTimeout(() => alert.remove(), 300);
+    }, duration);
+}
+
+// Custom confirmation modal (replaces native confirm())
+function showConfirm(message, options = {}) {
+    return new Promise((resolve) => {
+        const {
+            title = 'Confirm',
+            confirmText = 'Confirm',
+            cancelText = 'Cancel',
+            type = 'warning' // 'warning', 'danger', 'info'
+        } = options;
+        
+        const icons = {
+            warning: 'exclamation-triangle',
+            danger: 'trash-alt',
+            info: 'question-circle'
+        };
+        
+        const colors = {
+            warning: '#f39c12',
+            danger: '#e74c3c',
+            info: '#3498db'
+        };
+        
+        const modalHtml = `
+            <div class="modal-overlay confirm-modal-overlay" id="confirmModal">
+                <div class="modal-content confirm-modal" onclick="event.stopPropagation()">
+                    <div class="confirm-icon" style="color: ${colors[type]}">
+                        <i class="fas fa-${icons[type]}"></i>
+                    </div>
+                    <h3 class="confirm-title">${escapeHtml(title)}</h3>
+                    <p class="confirm-message">${escapeHtml(message)}</p>
+                    <div class="confirm-buttons">
+                        <button class="btn btn-secondary" id="confirmCancel">${escapeHtml(cancelText)}</button>
+                        <button class="btn btn-${type === 'danger' ? 'danger' : 'primary'}" id="confirmOk">${escapeHtml(confirmText)}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Remove existing modal if any
+        const existing = document.getElementById('confirmModal');
+        if (existing) existing.remove();
+        
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        const modal = document.getElementById('confirmModal');
+        const btnOk = document.getElementById('confirmOk');
+        const btnCancel = document.getElementById('confirmCancel');
+        
+        // Animate in
+        requestAnimationFrame(() => {
+            modal.classList.add('confirm-show');
+        });
+        
+        const closeModal = (result) => {
+            modal.classList.remove('confirm-show');
+            setTimeout(() => modal.remove(), 200);
+            resolve(result);
+        };
+        
+        btnOk.onclick = () => closeModal(true);
+        btnCancel.onclick = () => closeModal(false);
+        modal.onclick = (e) => {
+            if (e.target === modal) closeModal(false);
+        };
+        
+        // Focus confirm button
+        btnOk.focus();
+        
+        // Handle escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal(false);
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    });
 }
 
 function escapeHtml(text) {
@@ -3038,80 +3382,80 @@ async function importBoxesCSV(input) {
     input.value = '';
 }
 
-// ==================== Orders ====================
+// ==================== Packages ====================
 
-async function loadOrders() {
+async function loadPackages() {
     try {
-        orders = await api.getOrders();
-        renderOrders();
+        packages = await api.getPackages();
+        renderPackages();
     } catch (error) {
-        showAlert('Failed to load orders', 'danger');
+        showAlert('Failed to load packages', 'danger');
     }
 }
 
-function filterOrders() {
-    const status = document.getElementById('orderStatusFilter').value;
-    renderOrders(status);
+function filterPackages() {
+    const status = document.getElementById('packageStatusFilter').value;
+    renderPackages(status);
 }
 
-function renderOrders(statusFilter = null) {
-    const tbody = document.getElementById('ordersTable');
+function renderPackages(statusFilter = null) {
+    const tbody = document.getElementById('packagesTable');
     const isManager = ['administrator', 'manager'].includes(currentUser.role);
     
-    let filteredOrders = orders;
+    let filteredPackages = packages;
     if (statusFilter) {
-        filteredOrders = orders.filter(o => o.status === statusFilter);
+        filteredPackages = packages.filter(p => p.status === statusFilter);
     }
 
-    if (filteredOrders.length === 0) {
+    if (filteredPackages.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="7" class="empty-state">
-                    <i class="fas fa-clipboard-list"></i>
-                    <h3>No orders found</h3>
-                    <p>Create a new order or adjust filters</p>
+                    <i class="fas fa-shipping-fast"></i>
+                    <h3>No packages found</h3>
+                    <p>Create a new package or adjust filters</p>
                 </td>
             </tr>
         `;
         return;
     }
 
-    tbody.innerHTML = filteredOrders.map(o => `
+    tbody.innerHTML = filteredPackages.map(p => `
         <tr>
-            <td><code>${escapeHtml(o.barcode)}</code></td>
-            <td><strong>${escapeHtml(o.name)}</strong></td>
-            <td><span class="status-badge ${o.status}">${o.status.toUpperCase()}</span></td>
-            <td>${o.item_count} items (${o.total_quantity} pcs)</td>
-            <td>${new Date(o.created_at).toLocaleDateString()}</td>
+            <td><code>${escapeHtml(p.barcode)}</code></td>
+            <td><strong>${escapeHtml(p.name)}</strong></td>
+            <td><span class="status-badge ${p.status}">${p.status.toUpperCase()}</span></td>
+            <td>${p.item_count} items (${p.total_quantity} pcs)</td>
+            <td>${new Date(p.created_at).toLocaleDateString()}</td>
             <td>
                 <div class="btn-group">
-                    <button class="btn btn-sm btn-primary" onclick="showOrderDetail(${o.id})" title="View Details">
+                    <button class="btn btn-sm btn-primary" onclick="showPackageDetail(${p.id})" title="View Details">
                         <i class="fas fa-eye"></i>
                     </button>
-                    ${isManager && !['done', 'cancelled'].includes(o.status) ? `
-                        <button class="btn btn-sm btn-success" onclick="packOrder(${o.id})" title="Pack Order">
+                    ${isManager && !['packed', 'cancelled'].includes(p.status) ? `
+                        <button class="btn btn-sm btn-success" onclick="packPackage(${p.id})" title="Pack Package">
                             <i class="fas fa-box"></i>
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="cancelOrder(${o.id})" title="Cancel Order">
+                        <button class="btn btn-sm btn-danger" onclick="cancelPackage(${p.id})" title="Cancel Package">
                             <i class="fas fa-ban"></i>
                         </button>
                     ` : ''}
-                    ${isManager && o.status === 'cancelled' ? `
-                        <button class="btn btn-sm btn-warning" onclick="deleteOrder(${o.id})" title="Delete Order">
+                    ${isManager && p.status === 'cancelled' ? `
+                        <button class="btn btn-sm btn-warning" onclick="deletePackage(${p.id})" title="Delete Package">
                             <i class="fas fa-trash"></i>
                         </button>
                     ` : ''}
                 </div>
             </td>
             <td>
-                <svg class="barcode-svg" data-barcode="${escapeHtml(o.barcode)}"></svg>
+                <svg class="barcode-svg" data-barcode="${escapeHtml(p.barcode)}"></svg>
             </td>
         </tr>
     `).join('');
     
     // Generate barcodes
     setTimeout(() => {
-        document.querySelectorAll('#ordersTable .barcode-svg').forEach(svg => {
+        document.querySelectorAll('#packagesTable .barcode-svg').forEach(svg => {
             try {
                 JsBarcode(svg, svg.dataset.barcode, {
                     format: "CODE128",
@@ -3127,68 +3471,68 @@ function renderOrders(statusFilter = null) {
     }, 0);
 }
 
-function showOrderModal() {
-    document.getElementById('orderModalTitle').textContent = 'New Order';
-    document.getElementById('orderId').value = '';
-    document.getElementById('orderBarcode').value = '';
-    document.getElementById('orderName').value = '';
-    document.getElementById('orderDescription').value = '';
-    document.getElementById('orderModal').classList.add('active');
+function showPackageModal() {
+    document.getElementById('packageModalTitle').textContent = 'New Package';
+    document.getElementById('packageId').value = '';
+    document.getElementById('packageBarcode').value = '';
+    document.getElementById('packageName').value = '';
+    document.getElementById('packageDescription').value = '';
+    document.getElementById('packageModal').classList.add('active');
 }
 
-function closeOrderModal() {
-    document.getElementById('orderModal').classList.remove('active');
+function closePackageModal() {
+    document.getElementById('packageModal').classList.remove('active');
 }
 
-async function saveOrder(event) {
+async function savePackage(event) {
     event.preventDefault();
     
     const data = {
-        barcode: document.getElementById('orderBarcode').value.trim(),
-        name: document.getElementById('orderName').value.trim(),
-        description: document.getElementById('orderDescription').value.trim() || null
+        barcode: document.getElementById('packageBarcode').value.trim(),
+        name: document.getElementById('packageName').value.trim(),
+        description: document.getElementById('packageDescription').value.trim() || null
     };
     
     try {
-        await api.createOrder(data);
-        showAlert('Order created successfully', 'success');
-        closeOrderModal();
-        await loadOrders();
+        await api.createPackage(data);
+        showAlert('Package created successfully', 'success');
+        closePackageModal();
+        await loadPackages();
     } catch (error) {
-        showAlert('Failed to create order: ' + error.message, 'danger');
+        showAlert('Failed to create package: ' + error.message, 'danger');
     }
 }
 
-function createNewOrder(barcode) {
+function createNewPackage(barcode) {
     closeUnknownBarcodePrompt();
     pendingNewBarcode = null;
     
-    document.getElementById('orderModalTitle').textContent = 'New Order';
-    document.getElementById('orderId').value = '';
-    document.getElementById('orderBarcode').value = barcode || '';
-    document.getElementById('orderName').value = '';
-    document.getElementById('orderDescription').value = '';
-    document.getElementById('orderModal').classList.add('active');
+    document.getElementById('packageModalTitle').textContent = 'New Package';
+    document.getElementById('packageId').value = '';
+    document.getElementById('packageBarcode').value = barcode || '';
+    document.getElementById('packageName').value = '';
+    document.getElementById('packageDescription').value = '';
+    document.getElementById('packageModal').classList.add('active');
     
-    setTimeout(() => document.getElementById('orderName').focus(), 100);
+    setTimeout(() => document.getElementById('packageName').focus(), 100);
 }
 
-async function showOrderDetail(orderId) {
+async function showPackageDetail(packageId) {
     try {
-        const order = await api.getOrder(orderId);
-        currentOrderDetail = order;
+        const pkg = await api.getPackage(packageId);
+        currentPackageDetail = pkg;
         
-        // Fill in order details
-        document.getElementById('orderDetailBarcode').textContent = order.barcode;
-        document.getElementById('orderDetailName').textContent = order.name;
-        document.getElementById('orderDetailDescription').textContent = order.description || '-';
-        document.getElementById('orderDetailStatus').textContent = order.status.toUpperCase();
-        document.getElementById('orderDetailStatus').className = 'status-badge ' + order.status;
-        document.getElementById('orderDetailCreated').textContent = new Date(order.created_at).toLocaleString();
+        // Fill in package details
+        document.getElementById('packageDetailBarcode').textContent = pkg.barcode;
+        document.getElementById('packageDetailName').textContent = pkg.name;
+        document.getElementById('packageDetailDescription').textContent = pkg.description || '-';
+        document.getElementById('packageDetailStatus').textContent = pkg.status.toUpperCase();
+        document.getElementById('packageDetailStatus').className = 'status-badge ' + pkg.status;
+        document.getElementById('packageDetailCreated').textContent = new Date(pkg.created_at).toLocaleString();
         
         // Generate barcode
         try {
-            JsBarcode('#orderDetailBarcodeSvg', order.barcode, {
+            JsBarcode('#packageDetailBarcodeSvg', pkg.barcode, {
                 format: "CODE128",
                 width: 2,
                 height: 50,
@@ -3198,40 +3542,38 @@ async function showOrderDetail(orderId) {
             console.warn('Failed to generate barcode:', e);
         }
         
-        // Render order items
-        renderOrderItems(order);
+        // Render package items
+        renderPackageItems(pkg);
         
         // Show/hide action buttons based on status
         const isManager = ['administrator', 'manager'].includes(currentUser.role);
-        const btnCancel = document.getElementById('btnCancelOrder');
-        const btnPack = document.getElementById('btnPackOrder');
-        const btnComplete = document.getElementById('btnCompleteOrder');
+        const btnCancel = document.getElementById('btnCancelPackage');
+        const btnPack = document.getElementById('btnPackPackage');
         
-        btnCancel.style.display = isManager && !['done', 'cancelled'].includes(order.status) ? '' : 'none';
-        btnPack.style.display = isManager && !['packed', 'done', 'cancelled'].includes(order.status) ? '' : 'none';
-        btnComplete.style.display = isManager && order.status === 'packed' ? '' : 'none';
+        btnCancel.style.display = isManager && !['packed', 'cancelled'].includes(pkg.status) ? '' : 'none';
+        btnPack.style.display = isManager && !['packed', 'cancelled'].includes(pkg.status) ? '' : 'none';
         
-        // Show return section for cancelled orders
+        // Show return section for cancelled packages
         const returnSection = document.getElementById('returnItemsSection');
-        if (order.status === 'cancelled' && order.order_items && order.order_items.length > 0) {
+        if (pkg.status === 'cancelled' && pkg.package_items && pkg.package_items.length > 0) {
             returnSection.classList.remove('hidden');
-            renderReturnItems(order);
+            renderReturnItems(pkg);
         } else {
             returnSection.classList.add('hidden');
         }
         
-        document.getElementById('orderDetailModal').classList.add('active');
+        document.getElementById('packageDetailModal').classList.add('active');
     } catch (error) {
-        showAlert('Failed to load order details: ' + error.message, 'danger');
+        showAlert('Failed to load package details: ' + error.message, 'danger');
     }
 }
 
-function renderOrderItems(order) {
-    const emptyState = document.getElementById('orderItemsEmpty');
-    const table = document.getElementById('orderItemsTable');
-    const tbody = document.getElementById('orderItemsTableBody');
+function renderPackageItems(pkg) {
+    const emptyState = document.getElementById('packageItemsEmpty');
+    const table = document.getElementById('packageItemsTable');
+    const tbody = document.getElementById('packageItemsTableBody');
     
-    if (!order.order_items || order.order_items.length === 0) {
+    if (!pkg.package_items || pkg.package_items.length === 0) {
         emptyState.classList.remove('hidden');
         table.classList.add('hidden');
         return;
@@ -3241,18 +3583,18 @@ function renderOrderItems(order) {
     table.classList.remove('hidden');
     
     const isManager = ['administrator', 'manager'].includes(currentUser.role);
-    const canRemove = isManager && !['done', 'cancelled'].includes(order.status);
+    const canRemove = isManager && !['packed', 'cancelled'].includes(pkg.status);
     
-    tbody.innerHTML = order.order_items.map(oi => `
+    tbody.innerHTML = pkg.package_items.map(pi => `
         <tr>
-            <td><strong>${escapeHtml(oi.item_name)}</strong></td>
-            <td><code>${escapeHtml(oi.item_barcode)}</code></td>
-            <td>${oi.source_box_name ? escapeHtml(oi.source_box_name) : '-'}</td>
-            <td>${oi.quantity}</td>
-            <td>${oi.price != null ? '$' + oi.price.toFixed(2) : '-'}</td>
+            <td><strong>${escapeHtml(pi.item_name)}</strong></td>
+            <td><code>${escapeHtml(pi.item_barcode)}</code></td>
+            <td>${pi.source_box_name ? escapeHtml(pi.source_box_name) : '-'}</td>
+            <td>${pi.quantity}</td>
+            <td>${pi.price != null ? '$' + pi.price.toFixed(2) : '-'}</td>
             <td>
                 ${canRemove ? `
-                    <button class="btn btn-sm btn-danger" onclick="removeOrderItem(${order.id}, ${oi.id})" title="Remove">
+                    <button class="btn btn-sm btn-danger" onclick="removePackageItem(${pkg.id}, ${pi.id})" title="Remove">
                         <i class="fas fa-trash"></i>
                     </button>
                 ` : ''}
@@ -3261,158 +3603,173 @@ function renderOrderItems(order) {
     `).join('');
 }
 
-function renderReturnItems(order) {
+function renderReturnItems(pkg) {
     const container = document.getElementById('returnItemsList');
     
-    container.innerHTML = order.order_items.map(oi => `
-        <div class="return-item-row" data-order-item-id="${oi.id}">
+    container.innerHTML = pkg.package_items.map(pi => `
+        <div class="return-item-row" data-package-item-id="${pi.id}">
             <div class="return-item-info">
-                <span class="return-item-name">${escapeHtml(oi.item_name)}</span>
-                <span class="return-item-box">→ ${oi.source_box_name ? escapeHtml(oi.source_box_name) : 'Unknown box'}</span>
-                <span class="return-item-qty">×${oi.quantity}</span>
+                <span class="return-item-name">${escapeHtml(pi.item_name)}</span>
+                <span class="return-item-box">→ ${pi.source_box_name ? escapeHtml(pi.source_box_name) : 'Unknown box'}</span>
+                <span class="return-item-qty">×${pi.quantity}</span>
             </div>
-            <button class="btn btn-sm btn-success" onclick="returnSingleItem(${order.id}, ${oi.id})">
+            <button class="btn btn-sm btn-success" onclick="returnSingleItem(${pkg.id}, ${pi.id})">
                 <i class="fas fa-undo"></i> Return
             </button>
         </div>
     `).join('');
 }
 
-function closeOrderDetailModal() {
-    document.getElementById('orderDetailModal').classList.remove('active');
-    currentOrderDetail = null;
+function closePackageDetailModal() {
+    document.getElementById('packageDetailModal').classList.remove('active');
+    currentPackageDetail = null;
 }
 
-async function packOrder(orderId) {
+async function packPackage(packageId) {
     try {
-        await api.packOrder(orderId);
-        showAlert('Order packed successfully', 'success');
+        await api.packPackage(packageId);
+        showAlert('Package packed successfully', 'success');
         clearCodeChain();
-        await loadOrders();
+        await loadPackages();
         
         // Refresh detail if open
-        if (currentOrderDetail && currentOrderDetail.id === orderId) {
-            await showOrderDetail(orderId);
+        if (currentPackageDetail && currentPackageDetail.id === packageId) {
+            await showPackageDetail(packageId);
         }
     } catch (error) {
-        showAlert('Failed to pack order: ' + error.message, 'danger');
+        showAlert('Failed to pack package: ' + error.message, 'danger');
     }
 }
 
-async function cancelOrder(orderId) {
-    if (!confirm('Are you sure you want to cancel this order?')) return;
+async function cancelPackage(packageId) {
+    const confirmed = await showConfirm('Are you sure you want to cancel this package?', {
+        title: 'Cancel Package',
+        confirmText: 'Cancel Package',
+        type: 'warning'
+    });
+    if (!confirmed) return;
     
     try {
-        await api.cancelOrder(orderId);
-        showAlert('Order cancelled', 'warning');
+        await api.cancelPackage(packageId);
+        showAlert('Package cancelled', 'warning');
         clearCodeChain();
-        await loadOrders();
+        await loadPackages();
         
         // Refresh detail if open
-        if (currentOrderDetail && currentOrderDetail.id === orderId) {
-            await showOrderDetail(orderId);
+        if (currentPackageDetail && currentPackageDetail.id === packageId) {
+            await showPackageDetail(packageId);
         }
     } catch (error) {
-        showAlert('Failed to cancel order: ' + error.message, 'danger');
+        showAlert('Failed to cancel package: ' + error.message, 'danger');
     }
 }
 
-async function deleteOrder(orderId) {
-    if (!confirm('Are you sure you want to delete this order?')) return;
+async function deletePackage(packageId) {
+    const confirmed = await showConfirm('Are you sure you want to delete this package? This cannot be undone.', {
+        title: 'Delete Package',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
     
     try {
-        await api.deleteOrder(orderId);
-        showAlert('Order deleted', 'success');
-        await loadOrders();
-        closeOrderDetailModal();
+        await api.deletePackage(packageId);
+        showAlert('Package deleted', 'success');
+        await loadPackages();
+        closePackageDetailModal();
     } catch (error) {
-        showAlert('Failed to delete order: ' + error.message, 'danger');
+        showAlert('Failed to delete package: ' + error.message, 'danger');
     }
 }
 
-async function removeOrderItem(orderId, orderItemId) {
-    if (!confirm('Remove this item from the order? (Item will NOT be returned to inventory)')) return;
+async function removePackageItem(packageId, packageItemId) {
+    const confirmed = await showConfirm('Remove this item from the package? The item will NOT be returned to inventory.', {
+        title: 'Remove Item',
+        confirmText: 'Remove',
+        type: 'warning'
+    });
+    if (!confirmed) return;
     
     try {
-        await api.removeItemFromOrder(orderId, orderItemId);
-        showAlert('Item removed from order', 'success');
-        await showOrderDetail(orderId);
-        await loadOrders();
+        await api.removeItemFromPackage(packageId, packageItemId);
+        showAlert('Item removed from package', 'success');
+        await showPackageDetail(packageId);
+        await loadPackages();
     } catch (error) {
         showAlert('Failed to remove item: ' + error.message, 'danger');
     }
 }
 
-async function returnSingleItem(orderId, orderItemId) {
+async function returnSingleItem(packageId, packageItemId) {
     try {
-        await api.returnItemToInventory(orderId, orderItemId);
+        await api.returnItemToInventory(packageId, packageItemId);
         showAlert('Item returned to inventory', 'success');
-        await showOrderDetail(orderId);
+        await showPackageDetail(packageId);
     } catch (error) {
         showAlert('Failed to return item: ' + error.message, 'danger');
     }
 }
 
 async function returnAllItems() {
-    if (!currentOrderDetail) return;
+    if (!currentPackageDetail) return;
     
     try {
-        const result = await api.returnAllItemsToInventory(currentOrderDetail.id);
+        const result = await api.returnAllItemsToInventory(currentPackageDetail.id);
         showAlert(`Returned ${result.returned} items to inventory`, 'success');
         
         if (result.errors.length) {
             console.log('Return errors:', result.errors);
         }
         
-        await showOrderDetail(currentOrderDetail.id);
+        await showPackageDetail(currentPackageDetail.id);
     } catch (error) {
         showAlert('Failed to return items: ' + error.message, 'danger');
     }
 }
 
 function markReturnsDone() {
-    closeOrderDetailModal();
+    closePackageDetailModal();
     clearCodeChain();
     showAlert('Returns completed', 'success');
 }
 
-// Order from Code Chain
-async function cancelOrderFromChain() {
-    if (!codeChain.order) return;
-    await cancelOrder(codeChain.order.id);
+// Package from Code Chain
+async function cancelPackageFromChain() {
+    if (!codeChain.package) return;
+    await cancelPackage(codeChain.package.id);
 }
 
-async function packOrderFromChain() {
-    if (!codeChain.order) return;
-    await packOrder(codeChain.order.id);
+async function packPackageFromChain() {
+    if (!codeChain.package) return;
+    await packPackage(codeChain.package.id);
 }
 
-async function cancelCurrentOrder() {
-    if (!currentOrderDetail) return;
-    await cancelOrder(currentOrderDetail.id);
+async function cancelCurrentPackage() {
+    if (!currentPackageDetail) return;
+    await cancelPackage(currentPackageDetail.id);
 }
 
-async function packCurrentOrder() {
-    if (!currentOrderDetail) return;
-    await packOrder(currentOrderDetail.id);
+async function packCurrentPackage() {
+    if (!currentPackageDetail) return;
+    await packPackage(currentPackageDetail.id);
 }
 
-async function completeCurrentOrder() {
-    if (!currentOrderDetail) return;
+async function completeCurrentPackage() {
+    if (!currentPackageDetail) return;
     
     try {
-        await api.completeOrder(currentOrderDetail.id);
-        showAlert('Order completed!', 'success');
-        await loadOrders();
-        closeOrderDetailModal();
+        await api.completePackage(currentPackageDetail.id);
+        showAlert('Package completed!', 'success');
+        await loadPackages();
+        closePackageDetailModal();
     } catch (error) {
-        showAlert('Failed to complete order: ' + error.message, 'danger');
+        showAlert('Failed to complete package: ' + error.message, 'danger');
     }
 }
 
-// Handle scanning an item to add to an order
-async function handleOrderItemScan(barcode) {
-    if (!codeChain.order || codeChain.action !== 'add') {
+// Handle scanning an item to add to a package
+async function handlePackageItemScan(barcode) {
+    if (!codeChain.package || codeChain.action !== 'add') {
         await searchByBarcode(barcode);
         return;
     }
@@ -3424,8 +3781,8 @@ async function handleOrderItemScan(barcode) {
             codeChain.target = item;
             updateCodeChainUI();
             
-            // Show quantity prompt for adding to order
-            showOrderQuantityPrompt(codeChain.order, item);
+            // Show quantity prompt for adding to package
+            showPackageQuantityPrompt(codeChain.package, item);
         } else {
             showAlert('Item not found', 'warning');
         }
@@ -3434,13 +3791,13 @@ async function handleOrderItemScan(barcode) {
     }
 }
 
-function showOrderQuantityPrompt(order, item) {
+function showPackageQuantityPrompt(pkg, item) {
     const title = document.getElementById('quantityPromptTitle');
     const itemLabel = document.getElementById('quantityPromptItem');
     const input = document.getElementById('scannerQuantityInput');
     const maxInfo = document.getElementById('quantityMaxInfo');
     
-    title.textContent = `Add to Order: ${order.name}`;
+    title.textContent = `Add to Package: ${pkg.name}`;
     itemLabel.textContent = `${item.name} (${item.quantity} available)`;
     input.value = 1;
     input.max = item.quantity;
@@ -3448,39 +3805,39 @@ function showOrderQuantityPrompt(order, item) {
     maxInfo.classList.remove('hidden');
     
     // Store context for submission
-    window.orderAddContext = { order, item };
+    window.packageAddContext = { pkg, item };
     
     document.getElementById('quantityPromptModal').classList.add('active');
 }
 
-// Override submitQuantityPrompt to handle order adds
+// Override submitQuantityPrompt to handle package adds
 const originalSubmitQuantityPrompt = window.submitQuantityPrompt;
 window.submitQuantityPrompt = async function() {
-    // Check if this is an order add operation
-    if (window.orderAddContext) {
-        const { order, item } = window.orderAddContext;
+    // Check if this is a package add operation
+    if (window.packageAddContext) {
+        const { pkg, item } = window.packageAddContext;
         const quantity = parseInt(document.getElementById('scannerQuantityInput').value) || 1;
         
         try {
-            await api.addItemToOrder(order.id, item.id, quantity);
-            showAlert(`Added ${quantity}x ${item.name} to order`, 'success');
+            await api.addItemToPackage(pkg.id, item.id, quantity);
+            showAlert(`Added ${quantity}x ${item.name} to package`, 'success');
             
             // Show success in chain
-            showCodeChainSuccess(`Added to ${order.name}`);
+            showCodeChainSuccess(`Added to ${pkg.name}`);
             
-            // Refresh orders
-            await loadOrders();
+            // Refresh packages
+            await loadPackages();
             
             // Clear context
-            window.orderAddContext = null;
+            window.packageAddContext = null;
             closeQuantityPrompt();
             
-            // Keep order in chain for more additions
+            // Keep package in chain for more additions
             setTimeout(() => {
                 codeChain.action = null;
                 codeChain.target = null;
                 updateCodeChainUI();
-                showAlert('Scan ACTION:ADD then item barcode to add more, or ACTION:DONE to pack', 'info');
+                showAlert('Scan OP:ADD then item barcode to add more, or ACT:OK to pack', 'info');
             }, 1500);
         } catch (error) {
             showAlert('Failed to add item: ' + error.message, 'danger');
@@ -3850,9 +4207,12 @@ async function deleteSupplierPattern(id) {
     const pattern = supplierPatterns.find(p => p.id === id);
     if (!pattern) return;
     
-    if (!confirm(`Delete supplier pattern "${pattern.name}"?`)) {
-        return;
-    }
+    const confirmed = await showConfirm(`Delete supplier pattern "${pattern.name}"?`, {
+        title: 'Delete Pattern',
+        confirmText: 'Delete',
+        type: 'danger'
+    });
+    if (!confirmed) return;
     
     try {
         await api.deleteSupplierPattern(id);
