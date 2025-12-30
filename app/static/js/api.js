@@ -1,4 +1,4 @@
-// API Client for Simple Inventory
+// API Client for Simple Inventory (Unified Entity Model)
 
 const API_BASE = '/api';
 
@@ -160,256 +160,376 @@ class ApiClient {
         });
     }
 
-    // Boxes
+    // ============================================================================
+    // ENTITIES (Unified Model - replaces items, boxes, packages)
+    // ============================================================================
+
+    async getEntities(params = {}) {
+        const queryParams = new URLSearchParams();
+        if (params.entity_type) queryParams.append('entity_type', params.entity_type);
+        if (params.warehouse_id) queryParams.append('warehouse_id', params.warehouse_id);
+        if (params.parent_id) queryParams.append('parent_id', params.parent_id);
+        if (params.root_only) queryParams.append('root_only', 'true');
+        if (params.search) queryParams.append('search', params.search);
+        if (params.status_filter) queryParams.append('status_filter', params.status_filter);
+        const queryString = queryParams.toString();
+        return this.request(`/entities/${queryString ? '?' + queryString : ''}`);
+    }
+
+    async getEntity(id) {
+        return this.request(`/entities/${id}`);
+    }
+
+    async getEntityByBarcode(barcode) {
+        return this.request(`/entities/barcode/${encodeURIComponent(barcode)}`);
+    }
+
+    async createEntity(data) {
+        return this.request('/entities/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateEntity(id, data) {
+        return this.request(`/entities/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async deleteEntity(id, force = false) {
+        const query = force ? '?force=true' : '';
+        return this.request(`/entities/${id}${query}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // Entity Operations
+    async moveEntity(id, data) {
+        // data: { target_warehouse_id, target_parent_id, quantity }
+        return this.request(`/entities/${id}/move`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async convertEntity(id, newType, newStatus = null) {
+        return this.request(`/entities/${id}/convert`, {
+            method: 'POST',
+            body: JSON.stringify({ new_type: newType, new_status: newStatus })
+        });
+    }
+
+    async splitEntity(id, data) {
+        // data: { quantity, new_barcode, target_warehouse_id, target_parent_id }
+        return this.request(`/entities/${id}/split`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async mergeEntities(targetId, sourceIds) {
+        return this.request(`/entities/${targetId}/merge`, {
+            method: 'POST',
+            body: JSON.stringify({ source_entity_ids: sourceIds })
+        });
+    }
+
+    async adjustQuantity(id, adjustment) {
+        return this.request(`/entities/${id}/quantity?adjustment=${adjustment}`, {
+            method: 'POST'
+        });
+    }
+
+    // Entity Children (Relations)
+    async getEntityChildren(id) {
+        return this.request(`/entities/${id}/children`);
+    }
+
+    async addChildToEntity(parentId, data) {
+        // data: { child_id, child_barcode, quantity, remove_from_source, price_snapshot, notes }
+        return this.request(`/entities/${parentId}/children`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async removeChildFromEntity(parentId, relationId, returnQuantity = false) {
+        const query = returnQuantity ? '?return_quantity=true' : '';
+        return this.request(`/entities/${parentId}/children/${relationId}${query}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async updateChildRelation(parentId, relationId, data) {
+        return this.request(`/entities/${parentId}/children/${relationId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    // Entity History
+    async getEntityHistory(id) {
+        return this.request(`/entities/${id}/history`);
+    }
+
+    // Entity Types
+    async getEntityTypes(activeOnly = true) {
+        const query = activeOnly ? '' : '?include_inactive=true';
+        return this.request(`/entity-types/${query}`);
+    }
+
+    async getEntityType(code) {
+        return this.request(`/entity-types/${code}`);
+    }
+
+    async createEntityType(data) {
+        return this.request('/entity-types/', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateEntityType(code, data) {
+        return this.request(`/entity-types/${code}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async deleteEntityType(code) {
+        return this.request(`/entity-types/${code}`, {
+            method: 'DELETE'
+        });
+    }
+
+    // ============================================================================
+    // Backward-compatible aliases (for old code that uses items/boxes/packages)
+    // These all use the unified entity API
+    // ============================================================================
+
+    // Boxes = entities with type 'container'
     async getBoxes(warehouseId = null) {
-        const params = warehouseId ? `?warehouse_id=${warehouseId}` : '';
-        return this.request(`/boxes/${params}`);
+        const params = { entity_type: 'container' };
+        if (warehouseId) params.warehouse_id = warehouseId;
+        return this.getEntities(params);
     }
 
     async getBox(id) {
-        return this.request(`/boxes/${id}`);
+        return this.getEntity(id);
     }
 
     async getBoxByBarcode(barcode) {
-        return this.request(`/boxes/barcode/${barcode}`);
+        return this.getEntityByBarcode(barcode);
     }
 
     async createBox(data) {
-        return this.request('/boxes/', {
-            method: 'POST',
-            body: JSON.stringify(data)
+        return this.createEntity({
+            ...data,
+            entity_type: 'container'
         });
     }
 
     async updateBox(id, data) {
-        return this.request(`/boxes/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return this.updateEntity(id, data);
     }
 
     async deleteBox(id) {
-        return this.request(`/boxes/${id}`, {
-            method: 'DELETE'
-        });
+        return this.deleteEntity(id);
     }
 
     async moveBox(id, targetWarehouseId) {
-        return this.request(`/boxes/${id}/move/${targetWarehouseId}`, {
-            method: 'POST'
-        });
+        return this.moveEntity(id, { target_warehouse_id: targetWarehouseId });
     }
 
-    // Items
-    async getItems(boxId = null, search = null) {
-        const params = new URLSearchParams();
-        if (boxId) params.append('box_id', boxId);
-        if (search) params.append('search', search);
-        const queryString = params.toString();
-        return this.request(`/items/${queryString ? '?' + queryString : ''}`);
+    // Items = entities with type 'item'
+    async getItems(parentId = null, search = null) {
+        const params = { entity_type: 'item' };
+        if (parentId) params.parent_id = parentId;
+        if (search) params.search = search;
+        return this.getEntities(params);
     }
 
     async getItem(id) {
-        return this.request(`/items/${id}`);
+        return this.getEntity(id);
     }
 
     async getItemByBarcode(barcode) {
-        return this.request(`/items/barcode/${barcode}`);
+        return this.getEntityByBarcode(barcode);
     }
 
     async createItem(data) {
-        return this.request('/items/', {
-            method: 'POST',
-            body: JSON.stringify(data)
+        return this.createEntity({
+            ...data,
+            entity_type: 'item',
+            parent_id: data.box_id || data.parent_id  // Map box_id to parent_id
         });
     }
 
     async updateItem(id, data) {
-        return this.request(`/items/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        const updateData = { ...data };
+        if (data.box_id) {
+            updateData.parent_id = data.box_id;
+            delete updateData.box_id;
+        }
+        return this.updateEntity(id, updateData);
     }
 
     async deleteItem(id) {
-        return this.request(`/items/${id}`, {
-            method: 'DELETE'
-        });
+        return this.deleteEntity(id);
     }
 
-    async moveItem(id, targetBoxId, quantity = null) {
-        const data = { target_box_id: targetBoxId };
+    async moveItem(id, targetParentId, quantity = null) {
+        const data = { target_parent_id: targetParentId };
         if (quantity) data.quantity = quantity;
-        return this.request(`/items/${id}/move`, {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
+        return this.moveEntity(id, data);
     }
 
     async takeItem(id, quantity = 1) {
-        return this.request(`/items/${id}/take?quantity=${quantity}`, {
-            method: 'POST'
-        });
+        return this.adjustQuantity(id, -quantity);
     }
 
     async storeItem(id, quantity = 1) {
-        return this.request(`/items/${id}/store?quantity=${quantity}`, {
-            method: 'POST'
-        });
+        return this.adjustQuantity(id, quantity);
     }
 
-    // CSV Import/Export
-    async exportItemsCSV() {
-        const response = await fetch(`${API_BASE}/items/export/csv`, {
-            headers: {
-                'Authorization': `Bearer ${this.token}`
-            }
-        });
-        if (!response.ok) throw new Error('Export failed');
-        return response.blob();
-    }
-
-    async exportBoxesCSV() {
-        const response = await fetch(`${API_BASE}/boxes/export/csv`, {
-            headers: {
-                'Authorization': `Bearer ${this.token}`
-            }
-        });
-        if (!response.ok) throw new Error('Export failed');
-        return response.blob();
-    }
-
-    async importItemsCSV(file) {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const response = await fetch(`${API_BASE}/items/import/csv`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.token}`
-            },
-            body: formData
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Import failed');
-        }
-        return response.json();
-    }
-
-    async importBoxesCSV(file) {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const response = await fetch(`${API_BASE}/boxes/import/csv`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.token}`
-            },
-            body: formData
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Import failed');
-        }
-        return response.json();
-    }
-
-    // Packages (replaces Orders)
+    // Packages = entities with type 'package'
     async getPackages(status = null) {
-        const params = status ? `?status_filter=${status}` : '';
-        return this.request(`/packages/${params}`);
+        const params = { entity_type: 'package' };
+        if (status) params.status_filter = status;
+        return this.getEntities(params);
     }
 
     async getPackage(id) {
-        return this.request(`/packages/${id}`);
+        return this.getEntity(id);
     }
 
     async getPackageByBarcode(barcode) {
-        return this.request(`/packages/barcode/${barcode}`);
+        return this.getEntityByBarcode(barcode);
     }
 
     async createPackage(data) {
-        return this.request('/packages/', {
-            method: 'POST',
-            body: JSON.stringify(data)
+        return this.createEntity({
+            ...data,
+            entity_type: 'package',
+            status: data.status || 'new'
         });
     }
 
     async updatePackage(id, data) {
-        return this.request(`/packages/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
+        return this.updateEntity(id, data);
     }
 
     async deletePackage(id) {
-        return this.request(`/packages/${id}`, {
-            method: 'DELETE'
-        });
+        return this.deleteEntity(id, true); // Force delete for packages
     }
 
     async addItemToPackage(packageId, itemId, quantity) {
-        return this.request(`/packages/${packageId}/items`, {
-            method: 'POST',
-            body: JSON.stringify({ item_id: itemId, quantity: quantity })
+        return this.addChildToEntity(packageId, {
+            child_id: itemId,
+            quantity: quantity,
+            remove_from_source: true
         });
     }
 
-    async removeItemFromPackage(packageId, packageItemId) {
-        return this.request(`/packages/${packageId}/items/${packageItemId}`, {
-            method: 'DELETE'
-        });
+    async removeItemFromPackage(packageId, relationId) {
+        return this.removeChildFromEntity(packageId, relationId, false);
     }
 
     async packPackage(packageId) {
-        return this.request(`/packages/${packageId}/pack`, {
-            method: 'POST'
-        });
+        return this.updateEntity(packageId, { status: 'packed' });
     }
 
     async completePackage(packageId) {
-        return this.request(`/packages/${packageId}/complete`, {
-            method: 'POST'
-        });
+        return this.updateEntity(packageId, { status: 'done' });
     }
 
     async cancelPackage(packageId) {
-        return this.request(`/packages/${packageId}/cancel`, {
-            method: 'POST'
-        });
+        return this.updateEntity(packageId, { status: 'cancelled' });
     }
 
-    async returnItemToInventory(packageId, packageItemId) {
-        return this.request(`/packages/${packageId}/return-item/${packageItemId}`, {
-            method: 'POST'
-        });
+    async returnItemToInventory(packageId, relationId) {
+        return this.removeChildFromEntity(packageId, relationId, true);
     }
 
     async returnAllItemsToInventory(packageId) {
-        return this.request(`/packages/${packageId}/return-all`, {
-            method: 'POST'
-        });
+        const children = await this.getEntityChildren(packageId);
+        let returned = 0;
+        const errors = [];
+        for (const relation of children) {
+            try {
+                await this.removeChildFromEntity(packageId, relation.id, true);
+                returned++;
+            } catch (e) {
+                errors.push(e.message);
+            }
+        }
+        return { returned, errors };
     }
 
     async convertPackageToBox(packageId, warehouseId) {
-        return this.request(`/packages/${packageId}/convert-to-box?warehouse_id=${warehouseId}`, {
-            method: 'POST'
-        });
+        await this.convertEntity(packageId, 'container');
+        await this.updateEntity(packageId, { warehouse_id: warehouseId, parent_id: null });
+        return { message: 'Package converted to container' };
     }
 
-    async convertPackageToItem(packageId, boxId) {
-        return this.request(`/packages/${packageId}/convert-to-item?box_id=${boxId}`, {
-            method: 'POST'
-        });
+    async convertPackageToItem(packageId, parentId) {
+        await this.convertEntity(packageId, 'item');
+        await this.updateEntity(packageId, { parent_id: parentId, warehouse_id: null });
+        return { message: 'Package converted to item' };
     }
 
     async convertBoxToPackage(boxId) {
-        return this.request(`/boxes/${boxId}/convert-to-package`, {
-            method: 'POST'
+        await this.convertEntity(boxId, 'package', 'new');
+        return { message: 'Container converted to package' };
+    }
+
+    // CSV Import/Export
+    async exportEntitiesCSV(entityType = null) {
+        const query = entityType ? `?entity_type=${entityType}` : '';
+        const response = await fetch(`${API_BASE}/entities/export/csv${query}`, {
+            headers: {
+                'Authorization': `Bearer ${this.token}`
+            }
         });
+        if (!response.ok) throw new Error('Export failed');
+        return response.blob();
+    }
+
+    async exportItemsCSV() {
+        return this.exportEntitiesCSV('item');
+    }
+
+    async exportBoxesCSV() {
+        return this.exportEntitiesCSV('container');
+    }
+
+    async importEntitiesCSV(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE}/entities/import/csv`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.token}`
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Import failed');
+        }
+        return response.json();
+    }
+
+    async importItemsCSV(file) {
+        return this.importEntitiesCSV(file);
+    }
+
+    async importBoxesCSV(file) {
+        return this.importEntitiesCSV(file);
     }
 
     // Inventory Checks
@@ -462,8 +582,8 @@ class ApiClient {
         });
     }
 
-    async updateCheckItem(checkId, itemId, actualQuantity) {
-        return this.request(`/checks/${checkId}/items/${itemId}`, {
+    async updateCheckItem(checkId, entityId, actualQuantity) {
+        return this.request(`/checks/${checkId}/items/${entityId}`, {
             method: 'PUT',
             body: JSON.stringify({ actual_quantity: actualQuantity })
         });

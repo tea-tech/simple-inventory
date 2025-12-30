@@ -7,7 +7,7 @@ from app.database import Base
 
 
 class Warehouse(Base):
-    """Warehouse model - contains boxes."""
+    """Warehouse model - contains entities."""
     __tablename__ = "warehouses"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -18,4 +18,4 @@ class Warehouse(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    boxes = relationship("Box", back_populates="warehouse")
+    entities = relationship("Entity", back_populates="warehouse")

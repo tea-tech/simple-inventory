@@ -33,11 +33,11 @@ class WarehouseResponse(WarehouseBase):
         from_attributes = True
 
 
-class WarehouseWithBoxes(WarehouseResponse):
-    """Schema for warehouse with boxes."""
-    boxes: List["BoxResponse"] = []
+class WarehouseWithEntities(WarehouseResponse):
+    """Schema for warehouse with entities."""
+    entities: List["EntitySummary"] = []
 
 
 # Forward reference for circular import
-from app.schemas.box import BoxResponse
-WarehouseWithBoxes.model_rebuild()
+from app.schemas.entity import EntitySummary
+WarehouseWithEntities.model_rebuild()

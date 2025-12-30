@@ -33,12 +33,12 @@ class CheckItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     check_id = Column(Integer, ForeignKey("inventory_checks.id"), nullable=False)
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
     
     # Snapshot of item info at check time
     item_barcode = Column(String, nullable=False)
     item_name = Column(String, nullable=False)
-    box_id = Column(Integer, nullable=True)
+    box_id = Column(Integer, nullable=True)  # Parent entity ID (container)
     box_name = Column(String, nullable=True)
     
     # Quantities
@@ -52,4 +52,4 @@ class CheckItem(Base):
     
     # Relationships
     inventory_check = relationship("InventoryCheck", back_populates="check_items")
-    item = relationship("Item")
+    entity = relationship("Entity")

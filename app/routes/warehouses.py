@@ -12,7 +12,7 @@ from app.schemas.warehouse import (
     WarehouseCreate,
     WarehouseResponse,
     WarehouseUpdate,
-    WarehouseWithBoxes,
+    WarehouseWithEntities,
 )
 
 router = APIRouter(prefix="/warehouses", tags=["Warehouses"])
@@ -44,13 +44,13 @@ async def create_warehouse(
     return db_warehouse
 
 
-@router.get("/{warehouse_id}", response_model=WarehouseWithBoxes)
+@router.get("/{warehouse_id}", response_model=WarehouseWithEntities)
 async def get_warehouse(
     warehouse_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_viewer)
 ):
-    """Get a specific warehouse with its boxes."""
+    """Get a specific warehouse with its entities."""
     warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
     if not warehouse:
         raise HTTPException(
@@ -98,11 +98,11 @@ async def delete_warehouse(
             detail="Warehouse not found"
         )
     
-    # Check if warehouse has boxes
-    if warehouse.boxes:
+    # Check if warehouse has entities
+    if warehouse.entities:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete warehouse with boxes. Remove all boxes first."
+            detail="Cannot delete warehouse with entities. Remove all entities first."
         )
     
     db.delete(warehouse)

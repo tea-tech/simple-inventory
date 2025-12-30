@@ -117,7 +117,8 @@ function initializeApp() {
 async function preloadData() {
     try {
         warehouses = await api.getWarehouses();
-        boxes = await api.getBoxes();
+        // Load containers (boxes) using entity API
+        boxes = await api.getEntities({ entity_type: 'container' });
     } catch (error) {
         console.error('Failed to preload data:', error);
     }
@@ -647,7 +648,6 @@ async function executeTake(item, quantity) {
 // ==================== ENTITY CONVERSION (OP:CHANGE) ====================
 
 async function convertPackageToBox(pkg) {
-    // Need to select a warehouse for the new box
     try {
         const warehouses = await api.getWarehouses();
         if (warehouses.length === 0) {
@@ -656,7 +656,6 @@ async function convertPackageToBox(pkg) {
             return;
         }
         
-        // Show warehouse selection modal
         showConversionWarehouseModal(pkg, warehouses);
     } catch (error) {
         showAlert(`Failed to load warehouses: ${error.message}`, 'danger');
@@ -665,10 +664,9 @@ async function convertPackageToBox(pkg) {
 }
 
 function showConversionWarehouseModal(pkg, warehouses) {
-    // Create modal HTML
     const modalHtml = `
-        <div class="modal-overlay" id="conversionWarehouseModal" onclick="closeConversionWarehouseModal(event)">
-            <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-overlay active" id="conversionWarehouseModal" onclick="closeConversionWarehouseModal(event)">
+            <div class="modal" onclick="event.stopPropagation()">
                 <div class="modal-header">
                     <h3><i class="fas fa-exchange-alt"></i> Convert Package to Box</h3>
                     <button class="modal-close" onclick="closeConversionWarehouseModal()">&times;</button>
@@ -746,8 +744,8 @@ async function convertPackageToItem(pkg) {
 function showConversionBoxModal(pkg, boxes) {
     // Create modal HTML
     const modalHtml = `
-        <div class="modal-overlay" id="conversionBoxModal" onclick="closeConversionBoxModal(event)">
-            <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-overlay active" id="conversionBoxModal" onclick="closeConversionBoxModal(event)">
+            <div class="modal" onclick="event.stopPropagation()">
                 <div class="modal-header">
                     <h3><i class="fas fa-exchange-alt"></i> Convert Package to Item</h3>
                     <button class="modal-close" onclick="closeConversionBoxModal()">&times;</button>
@@ -1055,54 +1053,43 @@ async function searchByBarcode(barcode) {
     showAlert(`Searching for barcode: ${barcode}...`, 'info');
 
     try {
-        // Try to find an item first
+        // Try to find entity by barcode (unified search)
         try {
-            const item = await api.getItemByBarcode(barcode);
-            if (item) {
-                // Start new Code Chain with this item (Step 1)
-                codeChain = { item: item, package: null, box: null, action: null, target: null };
-                updateCodeChainUI();
-                showBarcodeResult('item', item);
-                return;
-            }
-        } catch (e) {
-            // Item not found, try box
-        }
-
-        // Try to find a box
-        try {
-            const box = await api.getBoxByBarcode(barcode);
-            if (box) {
-                // Check if we have a pending new item waiting for a box
-                if (pendingNewBarcode && pendingNewBarcode.type === 'item') {
-                    // Auto-fill the box in the item form
-                    document.getElementById('itemBox').value = box.id;
-                    pendingNewBarcode = null;
-                    showAlert(`Box "${box.name}" selected for new item`, 'success');
+            const entity = await api.getEntityByBarcode(barcode);
+            if (entity) {
+                // Determine entity type and handle accordingly
+                if (entity.entity_type === 'item') {
+                    codeChain = { item: entity, package: null, box: null, action: null, target: null };
+                    updateCodeChainUI();
+                    showBarcodeResult('item', entity);
+                    return;
+                } else if (entity.entity_type === 'container') {
+                    // Check if we have a pending new item waiting for a box
+                    if (pendingNewBarcode && pendingNewBarcode.type === 'item') {
+                        // Auto-fill the box in the item form
+                        document.getElementById('itemBoxId').value = entity.id;
+                        document.getElementById('itemBoxInput').value = entity.barcode;
+                        pendingNewBarcode = null;
+                        showAlert(`Box "${entity.name}" selected for new item`, 'success');
+                        return;
+                    }
+                    codeChain = { item: null, package: null, box: entity, action: null, target: null };
+                    updateCodeChainUI();
+                    showBarcodeResult('box', entity);
+                    return;
+                } else if (entity.entity_type === 'package') {
+                    codeChain = { item: null, package: entity, box: null, action: null, target: null };
+                    updateCodeChainUI();
+                    showBarcodeResult('package', entity);
+                    return;
+                } else {
+                    // Unknown entity type - show as generic entity
+                    showAlert(`Found ${entity.entity_type}: ${entity.name}`, 'info');
                     return;
                 }
-                // Start new Code Chain with this box (Step 1)
-                codeChain = { item: null, package: null, box: box, action: null, target: null };
-                updateCodeChainUI();
-                showBarcodeResult('box', box);
-                return;
             }
         } catch (e) {
-            // Box not found, try package
-        }
-
-        // Try to find a package
-        try {
-            const pkg = await api.getPackageByBarcode(barcode);
-            if (pkg) {
-                // Start new Code Chain with this package
-                codeChain = { item: null, package: pkg, box: null, action: null, target: null };
-                updateCodeChainUI();
-                showBarcodeResult('package', pkg);
-                return;
-            }
-        } catch (e) {
-            // Package not found either
+            // Entity not found
         }
 
         // Unknown barcode - prompt user for type (manager only)
@@ -1262,7 +1249,7 @@ function showBarcodeResult(type, data) {
     const actions = document.getElementById('barcodeResultActions');
 
     if (type === 'item') {
-        const box = boxes.find(b => b.id === data.box_id);
+        const box = boxes.find(b => b.id === data.parent_id);
         title.innerHTML = `<i class="fas fa-cube"></i> Item Found`;
         
         let originInfo = '';
@@ -1365,11 +1352,11 @@ function showBarcodeResult(type, data) {
                 </div>
                 <div class="result-row">
                     <span class="label">Status:</span>
-                    <span class="value"><span class="status-badge ${data.status}">${data.status.toUpperCase()}</span></span>
+                    <span class="value"><span class="status-badge ${data.status || 'new'}">${(data.status || 'new').toUpperCase()}</span></span>
                 </div>
                 <div class="result-row">
                     <span class="label">Items:</span>
-                    <span class="value"><strong>${data.package_items ? data.package_items.length : 0}</strong> item(s)</span>
+                    <span class="value"><strong>${data.children_count || 0}</strong> item(s)</span>
                 </div>
             </div>
             <div class="package-scan-hint">
@@ -1384,7 +1371,7 @@ function showBarcodeResult(type, data) {
             </button>
         `;
         
-        if (isManager && data.status !== 'packed' && data.status !== 'cancelled') {
+        if (isManager && !['packed', 'cancelled', 'done'].includes(data.status)) {
             actionButtons += `
                 <button class="btn btn-success" onclick="closeBarcodeResultModal(); packPackage(${data.id})">
                     <i class="fas fa-box"></i> Pack
@@ -1469,19 +1456,19 @@ async function loadPageData(page) {
 // Dashboard
 async function loadDashboard() {
     try {
-        const [warehouseData, boxData, itemData, packageData] = await Promise.all([
+        const [warehouseData, containerData, itemData, packageData] = await Promise.all([
             api.getWarehouses(),
-            api.getBoxes(),
-            api.getItems(),
-            api.getPackages()
+            api.getEntities({ entity_type: 'container' }),
+            api.getEntities({ entity_type: 'item' }),
+            api.getEntities({ entity_type: 'package' })
         ]);
 
         document.getElementById('stat-warehouses').textContent = warehouseData.length;
-        document.getElementById('stat-boxes').textContent = boxData.length;
+        document.getElementById('stat-boxes').textContent = containerData.length;
         document.getElementById('stat-items').textContent = itemData.reduce((sum, item) => sum + item.quantity, 0);
         
         // Count active packages (not packed or cancelled)
-        const activePackages = packageData.filter(p => !['packed', 'cancelled'].includes(p.status));
+        const activePackages = packageData.filter(p => !['packed', 'cancelled', 'done'].includes(p.status));
         document.getElementById('stat-packages').textContent = activePackages.length;
 
         if (currentUser.role === 'administrator') {
@@ -1637,7 +1624,9 @@ async function loadBoxes() {
         updateWarehouseSelects();
 
         const warehouseId = document.getElementById('boxWarehouseFilter').value;
-        boxes = await api.getBoxes(warehouseId || null);
+        const params = { entity_type: 'container' };
+        if (warehouseId) params.warehouse_id = warehouseId;
+        boxes = await api.getEntities(params);
         renderBoxes();
     } catch (error) {
         showAlert('Failed to load boxes', 'danger');
@@ -1757,21 +1746,22 @@ async function saveBox(e) {
         barcode: document.getElementById('boxBarcode').value,
         name: document.getElementById('boxName').value,
         description: document.getElementById('boxDescription').value || null,
-        warehouse_id: parseInt(document.getElementById('boxWarehouse').value)
+        warehouse_id: parseInt(document.getElementById('boxWarehouse').value),
+        entity_type: 'container'
     };
 
     try {
         if (id) {
-            await api.updateBox(id, data);
+            await api.updateEntity(id, data);
             showAlert('Box updated successfully', 'success');
         } else {
-            await api.createBox(data);
+            await api.createEntity(data);
             showAlert('Box created successfully', 'success');
         }
         closeBoxModal();
         await loadBoxes();
         // Refresh box selects in item forms
-        boxes = await api.getBoxes();
+        boxes = await api.getEntities({ entity_type: 'container' });
         updateBoxSelects();
     } catch (error) {
         showAlert(error.message, 'danger');
@@ -1794,7 +1784,7 @@ async function deleteBox(id) {
     if (!confirmed) return;
 
     try {
-        await api.deleteBox(id);
+        await api.deleteEntity(id);
         showAlert('Box deleted successfully', 'success');
         await loadBoxes();
     } catch (error) {
@@ -1859,12 +1849,15 @@ async function moveBox(e) {
 // Items
 async function loadItems() {
     try {
-        boxes = await api.getBoxes();
+        boxes = await api.getEntities({ entity_type: 'container' });
         updateBoxSelects();
 
         const boxId = document.getElementById('itemBoxFilter').value;
         const search = document.getElementById('itemSearch').value;
-        items = await api.getItems(boxId || null, search || null);
+        const params = { entity_type: 'item' };
+        if (boxId) params.parent_id = boxId;
+        if (search) params.search = search;
+        items = await api.getEntities(params);
         renderItems();
     } catch (error) {
         showAlert('Failed to load items', 'danger');
@@ -1911,7 +1904,7 @@ function renderItems() {
     }
 
     tbody.innerHTML = items.map(item => {
-        const box = boxes.find(b => b.id === item.box_id);
+        const box = boxes.find(b => b.id === item.parent_id);
         const priceDisplay = item.price !== null && item.price !== undefined 
             ? `$${item.price.toFixed(2)}` 
             : '-';
@@ -1975,9 +1968,9 @@ function showItemModal(item = null) {
     if (item) {
         document.getElementById('itemId').value = item.id;
         document.getElementById('itemBarcode').value = item.barcode;
-        const box = boxes.find(b => b.id === item.box_id);
+        const box = boxes.find(b => b.id === item.parent_id);
         document.getElementById('itemBoxInput').value = box ? box.barcode : '';
-        document.getElementById('itemBoxId').value = item.box_id;
+        document.getElementById('itemBoxId').value = item.parent_id;
         document.getElementById('itemName').value = item.name;
         document.getElementById('itemDescription').value = item.description || '';
         document.getElementById('itemQuantity').value = item.quantity;
@@ -2241,15 +2234,16 @@ async function saveItem(e) {
         description: document.getElementById('itemDescription').value || null,
         quantity: parseInt(document.getElementById('itemQuantity').value),
         price: priceValue ? parseFloat(priceValue) : null,
-        box_id: parseInt(boxId)
+        parent_id: parseInt(boxId),
+        entity_type: 'item'
     };
 
     try {
         if (id) {
-            await api.updateItem(id, data);
+            await api.updateEntity(id, data);
             showAlert('Item updated successfully', 'success');
         } else {
-            await api.createItem(data);
+            await api.createEntity(data);
             showAlert('Item created successfully', 'success');
         }
         closeItemModal();
@@ -2275,7 +2269,7 @@ async function deleteItem(id) {
     if (!confirmed) return;
 
     try {
-        await api.deleteItem(id);
+        await api.deleteEntity(id);
         showAlert('Item deleted successfully', 'success');
         await loadItems();
     } catch (error) {
@@ -3386,7 +3380,7 @@ async function importBoxesCSV(input) {
 
 async function loadPackages() {
     try {
-        packages = await api.getPackages();
+        packages = await api.getEntities({ entity_type: 'package' });
         renderPackages();
     } catch (error) {
         showAlert('Failed to load packages', 'danger');
@@ -3424,15 +3418,15 @@ function renderPackages(statusFilter = null) {
         <tr>
             <td><code>${escapeHtml(p.barcode)}</code></td>
             <td><strong>${escapeHtml(p.name)}</strong></td>
-            <td><span class="status-badge ${p.status}">${p.status.toUpperCase()}</span></td>
-            <td>${p.item_count} items (${p.total_quantity} pcs)</td>
+            <td><span class="status-badge ${p.status || 'new'}">${(p.status || 'new').toUpperCase()}</span></td>
+            <td>${p.children_count || 0} items</td>
             <td>${new Date(p.created_at).toLocaleDateString()}</td>
             <td>
                 <div class="btn-group">
                     <button class="btn btn-sm btn-primary" onclick="showPackageDetail(${p.id})" title="View Details">
                         <i class="fas fa-eye"></i>
                     </button>
-                    ${isManager && !['packed', 'cancelled'].includes(p.status) ? `
+                    ${isManager && !['packed', 'cancelled', 'done'].includes(p.status) ? `
                         <button class="btn btn-sm btn-success" onclick="packPackage(${p.id})" title="Pack Package">
                             <i class="fas fa-box"></i>
                         </button>
@@ -3519,15 +3513,19 @@ function createNewPackage(barcode) {
 
 async function showPackageDetail(packageId) {
     try {
-        const pkg = await api.getPackage(packageId);
+        const pkg = await api.getEntity(packageId);
         currentPackageDetail = pkg;
+        
+        // Get children (items in package)
+        const children = await api.getEntityChildren(packageId);
+        pkg.package_items = children;
         
         // Fill in package details
         document.getElementById('packageDetailBarcode').textContent = pkg.barcode;
         document.getElementById('packageDetailName').textContent = pkg.name;
         document.getElementById('packageDetailDescription').textContent = pkg.description || '-';
-        document.getElementById('packageDetailStatus').textContent = pkg.status.toUpperCase();
-        document.getElementById('packageDetailStatus').className = 'status-badge ' + pkg.status;
+        document.getElementById('packageDetailStatus').textContent = (pkg.status || 'new').toUpperCase();
+        document.getElementById('packageDetailStatus').className = 'status-badge ' + (pkg.status || 'new');
         document.getElementById('packageDetailCreated').textContent = new Date(pkg.created_at).toLocaleString();
         
         // Generate barcode
@@ -3550,8 +3548,8 @@ async function showPackageDetail(packageId) {
         const btnCancel = document.getElementById('btnCancelPackage');
         const btnPack = document.getElementById('btnPackPackage');
         
-        btnCancel.style.display = isManager && !['packed', 'cancelled'].includes(pkg.status) ? '' : 'none';
-        btnPack.style.display = isManager && !['packed', 'cancelled'].includes(pkg.status) ? '' : 'none';
+        btnCancel.style.display = isManager && !['packed', 'cancelled', 'done'].includes(pkg.status) ? '' : 'none';
+        btnPack.style.display = isManager && !['packed', 'cancelled', 'done'].includes(pkg.status) ? '' : 'none';
         
         // Show return section for cancelled packages
         const returnSection = document.getElementById('returnItemsSection');
@@ -3583,41 +3581,53 @@ function renderPackageItems(pkg) {
     table.classList.remove('hidden');
     
     const isManager = ['administrator', 'manager'].includes(currentUser.role);
-    const canRemove = isManager && !['packed', 'cancelled'].includes(pkg.status);
+    const canRemove = isManager && !['packed', 'cancelled', 'done'].includes(pkg.status);
     
-    tbody.innerHTML = pkg.package_items.map(pi => `
+    // pkg.package_items is now EntityRelation[] with child: EntitySummary
+    tbody.innerHTML = pkg.package_items.map(rel => {
+        const child = rel.child || {};
+        const itemName = child.name || 'Unknown';
+        const itemBarcode = child.barcode || '-';
+        const price = rel.price_snapshot;
+        return `
         <tr>
-            <td><strong>${escapeHtml(pi.item_name)}</strong></td>
-            <td><code>${escapeHtml(pi.item_barcode)}</code></td>
-            <td>${pi.source_box_name ? escapeHtml(pi.source_box_name) : '-'}</td>
-            <td>${pi.quantity}</td>
-            <td>${pi.price != null ? '$' + pi.price.toFixed(2) : '-'}</td>
+            <td><strong>${escapeHtml(itemName)}</strong></td>
+            <td><code>${escapeHtml(itemBarcode)}</code></td>
+            <td>-</td>
+            <td>${rel.quantity}</td>
+            <td>${price != null ? '$' + price.toFixed(2) : '-'}</td>
             <td>
                 ${canRemove ? `
-                    <button class="btn btn-sm btn-danger" onclick="removePackageItem(${pkg.id}, ${pi.id})" title="Remove">
+                    <button class="btn btn-sm btn-danger" onclick="removePackageItem(${pkg.id}, ${rel.id})" title="Remove">
                         <i class="fas fa-trash"></i>
                     </button>
                 ` : ''}
             </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function renderReturnItems(pkg) {
     const container = document.getElementById('returnItemsList');
     
-    container.innerHTML = pkg.package_items.map(pi => `
-        <div class="return-item-row" data-package-item-id="${pi.id}">
+    // pkg.package_items is now EntityRelation[] with child: EntitySummary
+    container.innerHTML = pkg.package_items.map(rel => {
+        const child = rel.child || {};
+        const itemName = child.name || 'Unknown';
+        return `
+        <div class="return-item-row" data-package-item-id="${rel.id}">
             <div class="return-item-info">
-                <span class="return-item-name">${escapeHtml(pi.item_name)}</span>
-                <span class="return-item-box">→ ${pi.source_box_name ? escapeHtml(pi.source_box_name) : 'Unknown box'}</span>
-                <span class="return-item-qty">×${pi.quantity}</span>
+                <span class="return-item-name">${escapeHtml(itemName)}</span>
+                <span class="return-item-box">→ Unknown location</span>
+                <span class="return-item-qty">×${rel.quantity}</span>
             </div>
-            <button class="btn btn-sm btn-success" onclick="returnSingleItem(${pkg.id}, ${pi.id})">
+            <button class="btn btn-sm btn-success" onclick="returnSingleItem(${pkg.id}, ${rel.id})">
                 <i class="fas fa-undo"></i> Return
             </button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function closePackageDetailModal() {

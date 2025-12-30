@@ -1,3 +1,4 @@
+"""Inventory check routes - updated for unified entity model."""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -7,8 +8,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models.inventory_check import InventoryCheck, CheckItem, CheckStatus
-from app.models.item import Item
-from app.models.box import Box
+from app.models.entity import Entity
 from app.schemas.inventory_check import (
     InventoryCheckCreate, InventoryCheckUpdate, InventoryCheckResponse,
     InventoryCheckSummary, InventoryCheckGrouped, BoxCheckGroup,
@@ -64,7 +64,7 @@ async def create_check(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMINISTRATOR, UserRole.MANAGER]))
 ):
-    """Create a new inventory check and populate with current items."""
+    """Create a new inventory check and populate with current entities of type 'item'."""
     # Create the check
     check = InventoryCheck(
         name=check_data.name,
@@ -75,17 +75,21 @@ async def create_check(
     db.add(check)
     db.flush()  # Get the ID
     
-    # Get all items and add them to the check
-    items = db.query(Item).all()
+    # Get all entities of type 'item' and add them to the check
+    items = db.query(Entity).filter(Entity.entity_type == "item").all()
     for item in items:
-        box = db.query(Box).filter(Box.id == item.box_id).first()
+        # Get parent entity (container) info
+        parent = None
+        if item.parent_id:
+            parent = db.query(Entity).filter(Entity.id == item.parent_id).first()
+        
         check_item = CheckItem(
             check_id=check.id,
             item_id=item.id,
             item_barcode=item.barcode,
             item_name=item.name,
-            box_id=item.box_id,
-            box_name=box.name if box else None,
+            box_id=item.parent_id,  # Using parent entity as "box"
+            box_name=parent.name if parent else None,
             expected_quantity=item.quantity,
             price=item.price
         )
@@ -101,7 +105,7 @@ async def get_active_check(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get the currently active (in_progress) check, grouped by box."""
+    """Get the currently active (in_progress) check, grouped by container."""
     check = db.query(InventoryCheck).filter(
         InventoryCheck.status == CheckStatus.in_progress
     ).first()
@@ -109,7 +113,7 @@ async def get_active_check(
     if not check:
         return None
     
-    return _group_check_by_box(check)
+    return _group_check_by_container(check, db)
 
 
 @router.get("/{check_id}", response_model=InventoryCheckResponse)
@@ -131,21 +135,21 @@ async def get_check_grouped(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get a check with items grouped by box."""
+    """Get a check with items grouped by container."""
     check = db.query(InventoryCheck).filter(InventoryCheck.id == check_id).first()
     if not check:
         raise HTTPException(status_code=404, detail="Check not found")
     
-    return _group_check_by_box(check)
+    return _group_check_by_container(check, db)
 
 
-def _group_check_by_box(check: InventoryCheck) -> InventoryCheckGrouped:
-    """Helper to group check items by box."""
+def _group_check_by_container(check: InventoryCheck, db: Session) -> InventoryCheckGrouped:
+    """Helper to group check items by container (parent entity)."""
     box_groups = {}
     
     for item in check.check_items:
-        box_key = item.box_id or 0  # Use 0 for items without box
-        box_name = item.box_name or "No Box"
+        box_key = item.box_id or 0  # Use 0 for items without parent
+        box_name = item.box_name or "No Container"
         
         if box_key not in box_groups:
             box_groups[box_key] = {
@@ -431,9 +435,9 @@ async def apply_corrections(
     corrections_made = 0
     for check_item in check.check_items:
         if check_item.actual_quantity is not None and check_item.actual_quantity != check_item.expected_quantity:
-            item = db.query(Item).filter(Item.id == check_item.item_id).first()
-            if item:
-                item.quantity = check_item.actual_quantity
+            entity = db.query(Entity).filter(Entity.id == check_item.item_id).first()
+            if entity:
+                entity.quantity = check_item.actual_quantity
                 corrections_made += 1
     
     db.commit()
@@ -454,18 +458,18 @@ async def export_check_for_print(
     if not check:
         raise HTTPException(status_code=404, detail="Check not found")
     
-    # Group items by box
+    # Group items by container (parent entity)
     box_groups = {}
     for item in check.check_items:
         box_key = item.box_id or 0
-        box_name = item.box_name or "No Box"
+        box_name = item.box_name or "No Container"
         if box_key not in box_groups:
-            # Get box barcode
+            # Get container barcode
             box_barcode = ""
             if item.box_id:
-                box = db.query(Box).filter(Box.id == item.box_id).first()
-                if box:
-                    box_barcode = box.barcode
+                container = db.query(Entity).filter(Entity.id == item.box_id).first()
+                if container:
+                    box_barcode = container.barcode
             box_groups[box_key] = {
                 "name": box_name,
                 "barcode": box_barcode,
@@ -473,7 +477,7 @@ async def export_check_for_print(
             }
         box_groups[box_key]["items"].append(item)
     
-    # Sort items within each box by name
+    # Sort items within each container by name
     for box in box_groups.values():
         box["items"].sort(key=lambda x: x.item_name)
     
@@ -601,7 +605,7 @@ async def export_check_for_print(
     </div>
 """
     
-    # Add each box section
+    # Add each container section
     for box_key in sorted(box_groups.keys()):
         box = box_groups[box_key]
         box_barcode_html = ""
@@ -648,7 +652,7 @@ async def export_check_for_print(
     html += """
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Generate box barcodes
+            // Generate container barcodes
             document.querySelectorAll('.barcode-box').forEach(function(svg) {
                 const code = svg.getAttribute('data-barcode');
                 if (code) {
